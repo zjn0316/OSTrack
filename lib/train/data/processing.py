@@ -36,27 +36,23 @@ class BaseProcessing:
 
 
 class STARKProcessing(BaseProcessing):
-    """ The processing class used for training LittleBoy. The images are processed in the following way.
-    First, the target bounding box is jittered by adding some noise. Next, a square region (called search region )
-    centered at the jittered target center, and of area search_area_factor^2 times the area of the jittered box is
-    cropped from the image. The reason for jittering the target box is to avoid learning the bias that the target is
-    always at the center of the search region. The search region is then resized to a fixed size given by the
-    argument output_sz.
-
+    """ 用于 LittleBoy 训练的数据预处理类。图像的处理流程如下：
+    首先，对目标的边界框（bounding box）进行扰动（加噪声）。
+    然后，以扰动后的目标中心为中心，
+    从原图中裁剪出一个正方形区域（称为搜索区域，search region），该区域面积为扰动后目标框面积的 search_area_factor^2 倍。
+    对目标框进行扰动的目的是避免模型学习到“目标总在搜索区域中心”的偏置。
+    最后，将搜索区域缩放到 output_sz 指定的固定尺寸。
     """
 
     def __init__(self, search_area_factor, output_sz, center_jitter_factor, scale_jitter_factor,
                  mode='pair', settings=None, *args, **kwargs):
         """
-        args:
-            search_area_factor - The size of the search region  relative to the target size.
-            output_sz - An integer, denoting the size to which the search region is resized. The search region is always
-                        square.
-            center_jitter_factor - A dict containing the amount of jittering to be applied to the target center before
-                                    extracting the search region. See _get_jittered_box for how the jittering is done.
-            scale_jitter_factor - A dict containing the amount of jittering to be applied to the target size before
-                                    extracting the search region. See _get_jittered_box for how the jittering is done.
-            mode - Either 'pair' or 'sequence'. If mode='sequence', then output has an extra dimension for frames
+        参数说明：
+            search_area_factor - 搜索区域相对于目标尺寸的缩放因子。
+            output_sz - 搜索区域缩放到的输出尺寸（整数，始终为正方形）。
+            center_jitter_factor - 一个 dict，表示在裁剪搜索区域前，对目标中心进行扰动的幅度。具体扰动方式见 _get_jittered_box。
+            scale_jitter_factor - 一个 dict，表示在裁剪搜索区域前，对目标尺寸进行扰动的幅度。具体扰动方式见 _get_jittered_box。
+            mode - 'pair' 或 'sequence'，若为 'sequence'，输出会多一维帧数。
         """
         super().__init__(*args, **kwargs)
         self.search_area_factor = search_area_factor
@@ -71,7 +67,6 @@ class STARKProcessing(BaseProcessing):
         args:
             box - input bounding box
             mode - string 'template' or 'search' indicating template or search data
-
         returns:
             torch.Tensor - jittered box
         """
@@ -91,7 +86,7 @@ class STARKProcessing(BaseProcessing):
             TensorDict - output data block with following fields:
                 'template_images', 'search_images', 'template_anno', 'search_anno', 'test_proposals', 'proposal_iou'
         """
-        # Apply joint transforms
+        # 应用joint transform
         if self.transform['joint'] is not None:
             data['template_images'], data['template_anno'], data['template_masks'] = self.transform['joint'](
                 image=data['template_images'], bbox=data['template_anno'], mask=data['template_masks'])
@@ -102,35 +97,34 @@ class STARKProcessing(BaseProcessing):
             assert self.mode == 'sequence' or len(data[s + '_images']) == 1, \
                 "In pair mode, num train/test frames must be 1"
 
-            # Add a uniform noise to the center pos
+            # 扰动bbox
             jittered_anno = [self._get_jittered_box(a, s) for a in data[s + '_anno']]
 
-            # 2021.1.9 Check whether data is valid. Avoid too small bounding boxes
+            # 避免bbox过小
             w, h = torch.stack(jittered_anno, dim=0)[:, 2], torch.stack(jittered_anno, dim=0)[:, 3]
-
             crop_sz = torch.ceil(torch.sqrt(w * h) * self.search_area_factor[s])
             if (crop_sz < 1).any():
                 data['valid'] = False
                 # print("Too small box is found. Replace it with new data.")
                 return data
 
-            # Crop image region centered at jittered_anno box and get the attention mask
+            # 以扰动后的目标为中心裁剪区域，生成注意力掩码
             crops, boxes, att_mask, mask_crops = prutils.jittered_center_crop(data[s + '_images'], jittered_anno,
                                                                               data[s + '_anno'], self.search_area_factor[s],
                                                                               self.output_sz[s], masks=data[s + '_masks'])
-            # Apply transforms
+            # 应用独立transform
             data[s + '_images'], data[s + '_anno'], data[s + '_att'], data[s + '_masks'] = self.transform[s](
                 image=crops, bbox=boxes, att=att_mask, mask=mask_crops, joint=False)
 
-            # 2021.1.9 Check whether elements in data[s + '_att'] is all 1
+            # 检查注意力掩码是否全为1（无效）
             # Note that type of data[s + '_att'] is tuple, type of ele is torch.tensor
             for ele in data[s + '_att']:
                 if (ele == 1).all():
                     data['valid'] = False
                     # print("Values of original attention mask are all one. Replace it with new data.")
                     return data
-            # 2021.1.10 more strict conditions: require the donwsampled masks not to be all 1
-            for ele in data[s + '_att']:
+                
+                # 检查下采样后是否全为1（无效）
                 feat_size = self.output_sz[s] // 16  # 16 is the backbone stride
                 # (1,1,128,128) (1,1,256,256) --> (1,1,8,8) (1,1,16,16)
                 mask_down = F.interpolate(ele[None, None].float(), size=feat_size).to(torch.bool)[0]

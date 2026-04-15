@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data.distributed import DistributedSampler
 # datasets related
-from lib.train.dataset import Lasot, Got10k, MSCOCOSeq, ImagenetVID, TrackingNet
+from lib.train.dataset import Lasot, Got10k, MSCOCOSeq, ImagenetVID, TrackingNet, OTB100UWB
 from lib.train.dataset import Lasot_lmdb, Got10k_lmdb, MSCOCOSeq_lmdb, ImagenetVID_lmdb, TrackingNet_lmdb
 from lib.train.data import sampler, opencv_loader, processing, LTRLoader
 import lib.train.data.transforms as tfm
@@ -29,7 +29,7 @@ def names2datasets(name_list: list, settings, image_loader):
     datasets = []
     for name in name_list:
         assert name in ["LASOT", "GOT10K_vottrain", "GOT10K_votval", "GOT10K_train_full", "GOT10K_official_val",
-                        "COCO17", "VID", "TRACKINGNET"]
+                        "COCO17", "VID", "TRACKINGNET", "OTB100_UWB"]
         if name == "LASOT":
             if settings.use_lmdb:
                 print("Building lasot dataset from lmdb")
@@ -78,11 +78,13 @@ def names2datasets(name_list: list, settings, image_loader):
             else:
                 # raise ValueError("NOW WE CAN ONLY USE TRACKINGNET FROM LMDB")
                 datasets.append(TrackingNet(settings.env.trackingnet_dir, image_loader=image_loader))
+        if name == "OTB100_UWB":
+            datasets.append(OTB100UWB(settings.env.otb100_uwb_dir, split='train', image_loader=image_loader))
     return datasets
 
 
 def build_dataloaders(cfg, settings):
-    # Data transform
+    # transform配置
     transform_joint = tfm.Transform(tfm.ToGrayscale(probability=0.05),
                                     tfm.RandomHorizontalFlip(probability=0.5))
 
@@ -97,6 +99,7 @@ def build_dataloaders(cfg, settings):
     output_sz = settings.output_sz
     search_area_factor = settings.search_area_factor
 
+    # 预处理配置
     data_processing_train = processing.STARKProcessing(search_area_factor=search_area_factor,
                                                        output_sz=output_sz,
                                                        center_jitter_factor=settings.center_jitter_factor,
@@ -121,6 +124,8 @@ def build_dataloaders(cfg, settings):
     sampler_mode = getattr(cfg.DATA, "SAMPLER_MODE", "causal")
     train_cls = getattr(cfg.TRAIN, "TRAIN_CLS", False)
     print("sampler_mode", sampler_mode)
+
+    # 采样
     dataset_train = sampler.TrackingSampler(datasets=names2datasets(cfg.DATA.TRAIN.DATASETS_NAME, settings, opencv_loader),
                                             p_datasets=cfg.DATA.TRAIN.DATASETS_RATIO,
                                             samples_per_epoch=cfg.DATA.TRAIN.SAMPLE_PER_EPOCH,
@@ -150,19 +155,25 @@ def build_dataloaders(cfg, settings):
 
 
 def get_optimizer_scheduler(net, cfg):
+    # 读取配置中是否只训练分类头；如果没有 TRAIN_CLS 字段，则默认进行正常训练。
     train_cls = getattr(cfg.TRAIN, "TRAIN_CLS", False)
     if train_cls:
         print("Only training classification head. Learnable parameters are shown below.")
+        # 只把参数名中包含 "cls" 且 requires_grad=True 的参数加入优化器。
         param_dicts = [
             {"params": [p for n, p in net.named_parameters() if "cls" in n and p.requires_grad]}
         ]
 
+        # 冻结所有非分类头参数，只保留分类头参与训练。
         for n, p in net.named_parameters():
             if "cls" not in n:
                 p.requires_grad = False
             else:
                 print(n)
     else:
+        # 正常训练模式：将参数分成非 backbone 和 backbone 两组。
+        # 非 backbone 参数使用默认学习率 cfg.TRAIN.LR。
+        # backbone 通常来自预训练模型，因此使用更小的学习率进行微调。
         param_dicts = [
             {"params": [p for n, p in net.named_parameters() if "backbone" not in n and p.requires_grad]},
             {
@@ -172,17 +183,22 @@ def get_optimizer_scheduler(net, cfg):
         ]
         if is_main_process():
             print("Learnable parameters are shown below.")
-            for n, p in net.named_parameters():
-                if p.requires_grad:
-                    print(n)
+            # for n, p in net.named_parameters():
+            #     if p.requires_grad:
+            #         print(n)
 
+    # 根据上面整理好的参数组创建优化器。
+    # AdamW 将 weight decay 从 Adam 更新中解耦，常用于训练 Transformer 类模型。
     if cfg.TRAIN.OPTIMIZER == "ADAMW":
         optimizer = torch.optim.AdamW(param_dicts, lr=cfg.TRAIN.LR,
                                       weight_decay=cfg.TRAIN.WEIGHT_DECAY)
     else:
         raise ValueError("Unsupported Optimizer")
+
+    # 创建学习率调度器：StepLR 每隔 LR_DROP_EPOCH 个 epoch 降低一次学习率。
     if cfg.TRAIN.SCHEDULER.TYPE == 'step':
         lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, cfg.TRAIN.LR_DROP_EPOCH)
+    # MultiStepLR 在配置的 milestone epoch 处降低学习率。
     elif cfg.TRAIN.SCHEDULER.TYPE == "Mstep":
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
                                                             milestones=cfg.TRAIN.SCHEDULER.MILESTONES,

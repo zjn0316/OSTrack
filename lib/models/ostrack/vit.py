@@ -35,8 +35,26 @@ from timm.models.registry import register_model
 from lib.models.layers.patch_embed import PatchEmbed
 from lib.models.ostrack.base_backbone import BaseBackbone
 
-
+# ViT = PatchEmbed + 12层 Block + 最后一层 LayerNorm
+# Block = Norm1 + Attention + Residual(残差 1) + Norm2 + MLP + Residual(残差 2)
+# Attention层 = qkv (线性投影) + Matrix Multiply & Softmax (核心计算) + proj (线性融合)
+# MLP层 = fc1 (线性升维) + GELU (激活) + fc2 (线性降维)
 class Attention(nn.Module):
+    """
+    Input [B, N, C]
+       │
+    [ qkv (Linear) ] -> [B, N, 3C]
+       │
+    [ Split Q, K, V ] -> 3 x [B, H, N, D]
+       │
+    [ Softmax(Q@K.T/scale) ] -> [B, H, N, N]
+       │
+    [ Attn @ V ] -> [B, N, C]
+       │
+    [ proj (Linear) ] -> [B, N, C]
+       │
+    Output [B, N, C]
+    """
     def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0.):
         super().__init__()
         self.num_heads = num_heads
@@ -50,15 +68,22 @@ class Attention(nn.Module):
 
     def forward(self, x, return_attention=False):
         B, N, C = x.shape
+        # [B,320,768] -> [B,320,3*768] -> [B,320,3,12,64] -> [3,B,12,320,64]
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        # [B, 12, 320, 64]
         q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)
-
+        # [B, 12, 320, 64] @ [B, 12, 64, 320] -> [B, 12, 320, 320]
         attn = (q @ k.transpose(-2, -1)) * self.scale
+        # 对最后一个维度进行 softmax，得到注意力权重
+        # [B, 12, 320, 320] -> [B, 12, 320, 320]
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
-
+        # [B, 12, 320, 320] @ [B, 12, 320, 64] -> [B, 12, 320, 64] 
+        # [B, 12, 320, 64] -> [B, 320, 12, 64] -> [B, 320, 768]
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        # [B, 320, 768]
         x = self.proj(x)
+        # [B, 320, 768]
         x = self.proj_drop(x)
 
         if return_attention:
@@ -78,6 +103,12 @@ class Block(nn.Module):
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
+
+    """
+    输入 x -> [LayerNorm 1] -> [Attention] -> [DropPath] -> + (残差连接) -> x1
+          -> [LayerNorm 2] -> [MLP]       -> [DropPath] -> + (残差连接) -> 输出
+    """
+
 
     def forward(self, x, return_attention=False):
         if return_attention:
@@ -139,29 +170,15 @@ class VisionTransformer(BaseBackbone):
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + self.num_tokens, embed_dim))
         self.pos_drop = nn.Dropout(p=drop_rate)
 
+        # 丢弃概率列表
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
+        # Transformer blocks
         self.blocks = nn.Sequential(*[
             Block(
                 dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, drop=drop_rate,
                 attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, act_layer=act_layer)
             for i in range(depth)])
         self.norm = norm_layer(embed_dim)
-
-        # # Representation layer
-        # if representation_size and not distilled:
-        #     self.num_features = representation_size
-        #     self.pre_logits = nn.Sequential(OrderedDict([
-        #         ('fc', nn.Linear(embed_dim, representation_size)),
-        #         ('act', nn.Tanh())
-        #     ]))
-        # else:
-        #     self.pre_logits = nn.Identity()
-        #
-        # # Classifier head(s)
-        # self.head = nn.Linear(self.num_features, num_classes) if num_classes > 0 else nn.Identity()
-        # self.head_dist = None
-        # if distilled:
-        #     self.head_dist = nn.Linear(self.embed_dim, self.num_classes) if num_classes > 0 else nn.Identity()
 
         self.init_weights(weight_init)
 
@@ -209,6 +226,7 @@ def _init_vit_weights(module: nn.Module, name: str = '', head_bias: float = 0., 
       as my original init for compatibility with prev hparam / downstream use cases (ie DeiT).
     * When called w/ valid n (module name) and jax_impl=True, will (hopefully) match JAX impl
     """
+    # 线性层初始化
     if isinstance(module, nn.Linear):
         if name.startswith('head'):
             nn.init.zeros_(module.weight)
@@ -228,11 +246,13 @@ def _init_vit_weights(module: nn.Module, name: str = '', head_bias: float = 0., 
                 trunc_normal_(module.weight, std=.02)
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)
+    # 卷积层初始化
     elif jax_impl and isinstance(module, nn.Conv2d):
         # NOTE conv was left to pytorch default in my original init
         lecun_normal_(module.weight)
         if module.bias is not None:
             nn.init.zeros_(module.bias)
+    # 归一化层初始化
     elif isinstance(module, (nn.LayerNorm, nn.GroupNorm, nn.BatchNorm2d)):
         nn.init.zeros_(module.bias)
         nn.init.ones_(module.weight)
@@ -366,9 +386,11 @@ def _create_vision_transformer(variant, pretrained=False, default_cfg=None, **kw
     model = VisionTransformer(**kwargs)
 
     if pretrained:
+        # 加载npz格式的预训练权重
         if 'npz' in pretrained:
             model.load_pretrained(pretrained, prefix='')
         else:
+            # 加载torch格式的预训练权重
             checkpoint = torch.load(pretrained, map_location="cpu")
             missing_keys, unexpected_keys = model.load_state_dict(checkpoint["model"], strict=False)
             print('Load pretrained model from: ' + pretrained)

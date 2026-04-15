@@ -43,6 +43,7 @@ class OSTrack(nn.Module):
                 ce_keep_rate=None,
                 return_last_attn=False,
                 ):
+        # backbone前向传播
         x, aux_dict = self.backbone(z=template, x=search,
                                     ce_template_mask=ce_template_mask,
                                     ce_keep_rate=ce_keep_rate,
@@ -93,13 +94,23 @@ class OSTrack(nn.Module):
 
 
 def build_ostrack(cfg, training=True):
-    current_dir = os.path.dirname(os.path.abspath(__file__))  # This is your Project Root
+    # =====================
+    # 设置路径
+    # =====================
+    # lib\models\ostrack\ostrack.py
+    current_dir = os.path.dirname(os.path.abspath(__file__)) 
+    # pretrained_models
     pretrained_path = os.path.join(current_dir, '../../../pretrained_models')
+    
+    # 判断是否需要加载预训练权重文件，并设置预训练权重的路径
     if cfg.MODEL.PRETRAIN_FILE and ('OSTrack' not in cfg.MODEL.PRETRAIN_FILE) and training:
         pretrained = os.path.join(pretrained_path, cfg.MODEL.PRETRAIN_FILE)
     else:
         pretrained = ''
 
+    # =====================
+    # 构建backbone
+    # =====================
     if cfg.MODEL.BACKBONE.TYPE == 'vit_base_patch16_224':
         backbone = vit_base_patch16_224(pretrained, drop_path_rate=cfg.TRAIN.DROP_PATH_RATE)
         hidden_dim = backbone.embed_dim
@@ -125,9 +136,13 @@ def build_ostrack(cfg, training=True):
     else:
         raise NotImplementedError
 
+    # 微调 pos_embed 形状[1, 197, 768]->[1, 256, 768]和[1, 64, 768]
     backbone.finetune_track(cfg=cfg, patch_start_index=patch_start_index)
 
-    box_head = build_box_head(cfg, hidden_dim)
+    # =====================
+    # 构建 head
+    # =====================
+    box_head = build_box_head(cfg, hidden_dim) # [B, 768, 16, 16]->[B, 4]
 
     model = OSTrack(
         backbone,
@@ -136,6 +151,7 @@ def build_ostrack(cfg, training=True):
         head_type=cfg.MODEL.HEAD.TYPE,
     )
 
+    # 加载之前训练过的权重
     if 'OSTrack' in cfg.MODEL.PRETRAIN_FILE and training:
         checkpoint = torch.load(cfg.MODEL.PRETRAIN_FILE, map_location="cpu")
         missing_keys, unexpected_keys = model.load_state_dict(checkpoint["net"], strict=False)

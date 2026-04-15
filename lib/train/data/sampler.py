@@ -9,41 +9,41 @@ def no_processing(data):
 
 
 class TrackingSampler(torch.utils.data.Dataset):
-    """ Class responsible for sampling frames from training sequences to form batches. 
+    """ 负责从训练序列中采样帧以组成batch的类。
 
-    The sampling is done in the following ways. First a dataset is selected at random. Next, a sequence is selected
-    from that dataset. A base frame is then sampled randomly from the sequence. Next, a set of 'train frames' and
-    'test frames' are sampled from the sequence from the range [base_frame_id - max_gap, base_frame_id]  and
-    (base_frame_id, base_frame_id + max_gap] respectively. Only the frames in which the target is visible are sampled.
-    If enough visible frames are not found, the 'max_gap' is increased gradually till enough frames are found.
+    采样流程如下：
+    首先随机选择一个数据集，然后从该数据集中选择一个序列。
+    接着在该序列中随机采样一个基准帧（base frame）。
+    随后，从区间 [base_frame_id - max_gap, base_frame_id] 采样一组“训练帧”（template frames），
+    最后，从区间 (base_frame_id, base_frame_id + max_gap] 采样一组“测试帧”（search frames）。
+    只采样目标可见的帧。如果找不到足够的可见帧，则会逐步增大 max_gap 直到采集到足够帧为止。
 
-    The sampled frames are then passed through the input 'processing' function for the necessary processing-
+    采样到的帧会传递给输入的 processing 函数进行必要的数据预处理（如裁剪、增强等）。
     """
 
     def __init__(self, datasets, p_datasets, samples_per_epoch, max_gap,
                  num_search_frames, num_template_frames=1, processing=no_processing, frame_sample_mode='causal',
                  train_cls=False, pos_prob=0.5):
         """
-        args:
-            datasets - List of datasets to be used for training
-            p_datasets - List containing the probabilities by which each dataset will be sampled
-            samples_per_epoch - Number of training samples per epoch
-            max_gap - Maximum gap, in frame numbers, between the train frames and the test frames.
-            num_search_frames - Number of search frames to sample.
-            num_template_frames - Number of template frames to sample.
-            processing - An instance of Processing class which performs the necessary processing of the data.
-            frame_sample_mode - Either 'causal' or 'interval'. If 'causal', then the test frames are sampled in a causally,
-                                otherwise randomly within the interval.
+        参数说明：
+            datasets - 用于训练的数据集列表
+            p_datasets - 每个数据集被采样的概率列表
+            samples_per_epoch - 每个epoch采样的样本数
+            max_gap - 训练帧与测试帧之间的最大帧间隔
+            num_search_frames - 采样的search帧数量
+            num_template_frames - 采样的template帧数量
+            processing - 数据预处理类的实例（如裁剪、增强等）
+            frame_sample_mode - 'causal' 或 'interval'，'causal'表示测试帧在时间上晚于训练帧，'interval'则在区间内随机采样
         """
         self.datasets = datasets
-        self.train_cls = train_cls  # whether we are training classification
-        self.pos_prob = pos_prob  # probability of sampling positive class when making classification
 
-        # If p not provided, sample uniformly from all videos
+        self.train_cls = train_cls  # 是否为分类任务训练
+        self.pos_prob = pos_prob    # 采样正样本（目标可见）的概率（用于分类任务）
+
+        # 如果没有指定采样概率，则默认所有数据集均匀采样
         if p_datasets is None:
             p_datasets = [len(d) for d in self.datasets]
-
-        # Normalize
+        # 归一化采样概率
         p_total = sum(p_datasets)
         self.p_datasets = [x / p_total for x in p_datasets]
 
@@ -59,24 +59,26 @@ class TrackingSampler(torch.utils.data.Dataset):
 
     def _sample_visible_ids(self, visible, num_ids=1, min_id=None, max_id=None,
                             allow_invisible=False, force_invisible=False):
-        """ Samples num_ids frames between min_id and max_id for which target is visible
+        """ 在[min_id, max_id)区间内采样num_ids个目标可见的帧编号
 
-        args:
-            visible - 1d Tensor indicating whether target is visible for each frame
-            num_ids - number of frames to be samples
-            min_id - Minimum allowed frame number
-            max_id - Maximum allowed frame number
+        参数：
+            visible - 1维Tensor，表示每帧目标是否可见
+            num_ids - 需要采样的帧数量
+            min_id - 允许采样的最小帧编号
+            max_id - 允许采样的最大帧编号
 
-        returns:
-            list - List of sampled frame numbers. None if not sufficient visible frames could be found.
+        返回：
+            list - 采样到的帧编号列表。如果没有足够的可见帧则返回None。
         """
+        # 特殊情况处理
         if num_ids == 0:
             return []
+        # 边界检查与矫正
         if min_id is None or min_id < 0:
             min_id = 0
         if max_id is None or max_id > len(visible):
             max_id = len(visible)
-        # get valid ids
+        # 筛选有用帧编号
         if force_invisible:
             valid_ids = [i for i in range(min_id, max_id) if not visible[i]]
         else:
@@ -85,10 +87,11 @@ class TrackingSampler(torch.utils.data.Dataset):
             else:
                 valid_ids = [i for i in range(min_id, max_id) if visible[i]]
 
-        # No visible ids
+        # 没有有效帧返回None
         if len(valid_ids) == 0:
             return None
 
+        # 从有效帧中随机采样
         return random.choices(valid_ids, k=num_ids)
 
     def __getitem__(self, index):
@@ -103,13 +106,13 @@ class TrackingSampler(torch.utils.data.Dataset):
             TensorDict - dict containing all the data blocks
         """
         valid = False
+        # 循环采样直到 valid = True
         while not valid:
-            # Select a dataset
+            # 随机选一个数据集
             dataset = random.choices(self.datasets, self.p_datasets)[0]
-
+            # 判断是否为视频数据集
             is_video_dataset = dataset.is_video_sequence()
-
-            # sample a sequence from the given dataset
+            # 从数据集中采样一个序列，并获取的可见性信息等
             seq_id, visible, seq_info_dict = self.sample_seq_from_dataset(dataset, is_video_dataset)
 
             if is_video_dataset:
@@ -117,8 +120,9 @@ class TrackingSampler(torch.utils.data.Dataset):
                 search_frame_ids = None
                 gap_increase = 0
 
+                # 根据采样模式（causal、trident、stark）采样 template 和 search 帧编号
                 if self.frame_sample_mode == 'causal':
-                    # Sample test and train frames in a causal manner, i.e. search_frame_ids > template_frame_ids
+                    # 保证 search 帧在 template 帧之后
                     while search_frame_ids is None:
                         base_frame_id = self._sample_visible_ids(visible, num_ids=1, min_id=self.num_template_frames - 1,
                                                                  max_id=len(visible) - self.num_search_frames)
@@ -146,13 +150,16 @@ class TrackingSampler(torch.utils.data.Dataset):
                 template_frame_ids = [1] * self.num_template_frames
                 search_frame_ids = [1] * self.num_search_frames
             try:
+                # 获取模板帧和搜索帧的图像、标注和其他元信息
                 template_frames, template_anno, meta_obj_train = dataset.get_frames(seq_id, template_frame_ids, seq_info_dict)
                 search_frames, search_anno, meta_obj_test = dataset.get_frames(seq_id, search_frame_ids, seq_info_dict)
 
                 H, W, _ = template_frames[0].shape
+                # 如果标注中没有 mask，则用全零 mask 占位
                 template_masks = template_anno['mask'] if 'mask' in template_anno else [torch.zeros((H, W))] * self.num_template_frames
                 search_masks = search_anno['mask'] if 'mask' in search_anno else [torch.zeros((H, W))] * self.num_search_frames
 
+                # 打包成字典
                 data = TensorDict({'template_images': template_frames,
                                    'template_anno': template_anno['bbox'],
                                    'template_masks': template_masks,
@@ -161,7 +168,8 @@ class TrackingSampler(torch.utils.data.Dataset):
                                    'search_masks': search_masks,
                                    'dataset': dataset.get_name(),
                                    'test_class': meta_obj_test.get('object_class_name')})
-                # make data augmentation
+                
+                # 进行预处理
                 data = self.processing(data)
 
                 # check whether data is valid
@@ -260,7 +268,7 @@ class TrackingSampler(torch.utils.data.Dataset):
         return torch.tensor([int(cx-w/2), int(cy-h/2), int(w), int(h)])
 
     def sample_seq_from_dataset(self, dataset, is_video_dataset):
-
+        """ Sample a sequence with enough visible frames"""
         # Sample a sequence with enough visible frames
         enough_visible_frames = False
         while not enough_visible_frames:
@@ -278,6 +286,7 @@ class TrackingSampler(torch.utils.data.Dataset):
         return seq_id, visible, seq_info_dict
 
     def get_one_search(self):
+        # 从负样本总采样一帧搜索帧
         # Select a dataset
         dataset = random.choices(self.datasets, self.p_datasets)[0]
 
@@ -298,7 +307,7 @@ class TrackingSampler(torch.utils.data.Dataset):
         return search_frames, search_anno, meta_obj_test
 
     def get_frame_ids_trident(self, visible):
-        # get template and search ids in a 'trident' manner
+        # 以 Trident 方式采样一组（template frames）和（search frames）的帧编号
         template_frame_ids_extra = []
         while None in template_frame_ids_extra or len(template_frame_ids_extra) == 0:
             template_frame_ids_extra = []
@@ -325,11 +334,11 @@ class TrackingSampler(torch.utils.data.Dataset):
         return template_frame_ids, search_frame_ids
 
     def get_frame_ids_stark(self, visible, valid):
-        # get template and search ids in a 'stark' manner
+        # 以 STARK 方式采样一组（template frames）和（search frames）的帧编号
         template_frame_ids_extra = []
         while None in template_frame_ids_extra or len(template_frame_ids_extra) == 0:
             template_frame_ids_extra = []
-            # first randomly sample two frames from a video
+            # 采样初始帧
             template_frame_id1 = self._sample_visible_ids(visible, num_ids=1)  # the initial template id
             search_frame_ids = self._sample_visible_ids(visible, num_ids=1)  # the search region id
             # get the dynamic template id
@@ -338,12 +347,14 @@ class TrackingSampler(torch.utils.data.Dataset):
                     min_id, max_id = search_frame_ids[0], search_frame_ids[0] + max_gap
                 else:
                     min_id, max_id = search_frame_ids[0] - max_gap, search_frame_ids[0]
-                """we require the frame to be valid but not necessary visible"""
+                """要求有效但不一定可见"""
+                # 采样额外模板帧
                 f_id = self._sample_visible_ids(valid, num_ids=1, min_id=min_id, max_id=max_id)
                 if f_id is None:
                     template_frame_ids_extra += [None]
                 else:
                     template_frame_ids_extra += f_id
-
+        # 拼接模板帧编号
         template_frame_ids = template_frame_id1 + template_frame_ids_extra
+
         return template_frame_ids, search_frame_ids

@@ -2,16 +2,27 @@ import torch
 import torch.utils.data.dataloader
 import importlib
 import collections
-from torch._six import string_classes
+# 兼容 PyTorch 2.0+
+try:
+    from torch._six import string_classes
+except ImportError:
+    string_classes = str
 from lib.utils import TensorDict, TensorList
 
 if float(torch.__version__[:3]) >= 1.9 or len('.'.join((torch.__version__).split('.')[0:2])) > 3:
     int_classes = int
 else:
-    from torch._six import int_classes
+    try:
+        from torch._six import int_classes
+    except ImportError:
+        int_classes = int
 
 
 def _check_use_shared_memory():
+    """
+    检查是否应该使用共享内存（shared memory）来存储张量。
+    通常在多进程数据加载时使用，以减少内存复制开销。
+    """
     if hasattr(torch.utils.data.dataloader, '_use_shared_memory'):
         return getattr(torch.utils.data.dataloader, '_use_shared_memory')
     collate_lib = importlib.import_module('torch.utils.data._utils.collate')
@@ -21,7 +32,10 @@ def _check_use_shared_memory():
 
 
 def ltr_collate(batch):
-    """Puts each data field into a tensor with outer dimension batch size"""
+    """
+    将 batch 中的每个数据字段整理到一个张量中，外层维度为 batch size。
+    默认在第 0 维（batch 维度）并行。
+    """
 
     error_msg = "batch must contain tensors, numbers, dicts or lists; found {}"
     elem_type = type(batch[0])
@@ -76,8 +90,10 @@ def ltr_collate_stack1(batch):
 
     error_msg = "batch must contain tensors, numbers, dicts or lists; found {}"
     elem_type = type(batch[0])
+    # 处理Tensor
     if isinstance(batch[0], torch.Tensor):
         out = None
+        # 共享内存检查
         if _check_use_shared_memory():
             # If we're in a background process, concatenate directly into a
             # shared memory tensor to avoid an extra copy
@@ -88,6 +104,7 @@ def ltr_collate_stack1(batch):
         # if batch[0].dim() < 4:
         #     return torch.stack(batch, 0, out=out)
         # return torch.cat(batch, 0, out=out)
+    # 处理 numpy 数组
     elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_' \
             and elem_type.__name__ != 'string_':
         elem = batch[0]
@@ -100,6 +117,7 @@ def ltr_collate_stack1(batch):
         if elem.shape == ():  # scalars
             py_type = float if elem.dtype.name.startswith('float') else int
             return torch.utils.data.dataloader.numpy_type_map[elem.dtype.name](list(map(py_type, batch)))
+    # 处理字典/自定义容器
     elif isinstance(batch[0], int_classes):
         return torch.LongTensor(batch)
     elif isinstance(batch[0], float):
@@ -110,6 +128,7 @@ def ltr_collate_stack1(batch):
         return TensorDict({key: ltr_collate_stack1([d[key] for d in batch]) for key in batch[0]})
     elif isinstance(batch[0], collections.Mapping):
         return {key: ltr_collate_stack1([d[key] for d in batch]) for key in batch[0]}
+    # 处理列表/序列
     elif isinstance(batch[0], TensorList):
         transposed = zip(*batch)
         return TensorList([ltr_collate_stack1(samples) for samples in transposed])
@@ -124,52 +143,36 @@ def ltr_collate_stack1(batch):
 
 class LTRLoader(torch.utils.data.dataloader.DataLoader):
     """
-    Data loader. Combines a dataset and a sampler, and provides
-    single- or multi-process iterators over the dataset.
+    数据加载器。结合了数据集（dataset）和采样器（sampler），并提供
+    对数据集进行单进程或多进程迭代。
 
-    Note: The only difference with default pytorch DataLoader is that an additional option stack_dim is available to
-            select along which dimension the data should be stacked to form a batch.
+    注意：与 PyTorch 默认的 DataLoader 唯一的区别在于，这里提供了一个额外的 stack_dim 选项，
+            用于选择在哪一个维度上将数据堆叠（stack）以形成一个 batch。
 
-    Arguments:
-        dataset (Dataset): dataset from which to load the data.
-        batch_size (int, optional): how many samples per batch to load
-            (default: 1).
-        shuffle (bool, optional): set to ``True`` to have the data reshuffled
-            at every epoch (default: False).
-        sampler (Sampler, optional): defines the strategy to draw samples from
-            the dataset. If specified, ``shuffle`` must be False.
-        batch_sampler (Sampler, optional): like sampler, but returns a batch of
-            indices at a time. Mutually exclusive with batch_size, shuffle,
-            sampler, and drop_last.
-        num_workers (int, optional): how many subprocesses to use for data
-            loading. 0 means that the data will be loaded in the main process.
-            (default: 0)
-        collate_fn (callable, optional): merges a list of samples to form a mini-batch.
-        stack_dim (int): Dimension along which to stack to form the batch. (default: 0)
-        pin_memory (bool, optional): If ``True``, the data loader will copy tensors
-            into CUDA pinned memory before returning them.
-        drop_last (bool, optional): set to ``True`` to drop the last incomplete batch,
-            if the dataset size is not divisible by the batch size. If ``False`` and
-            the size of dataset is not divisible by the batch size, then the last batch
-            will be smaller. (default: False)
-        timeout (numeric, optional): if positive, the timeout value for collecting a batch
-            from workers. Should always be non-negative. (default: 0)
-        worker_init_fn (callable, optional): If not None, this will be called on each
-            worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
-            input, after seeding and before data loading. (default: None)
+    参数：
+        dataset (Dataset): 从中加载数据的数据集。
+        batch_size (int, 可选): 每个 batch 加载多少个样本（默认值：1）。
+        shuffle (bool, 可选): 设置为 ``True`` 表示在每个 epoch 重新打乱数据（默认值：False）。
+        sampler (Sampler, 可选): 定义从数据集中抽取样本的策略。如果指定，则 ``shuffle`` 必须为 False。
+        batch_sampler (Sampler, 可选): 类似于 sampler，但每次返回一个 batch 的索引。与 batch_size, shuffle,
+            sampler, 和 drop_last 互斥。
+        num_workers (int, 可选): 使用多少个子进程来加载数据。0 表示在主进程中加载数据。（默认值：0）
+        collate_fn (callable, 可选): 将样本列表合并以形成 mini-batch。
+        stack_dim (int): 堆叠形成 batch 的维度。（默认值：0）
+        pin_memory (bool, 可选): 如果为 ``True``，数据加载器将在返回前将张量复制到 CUDA 固定内存（pinned memory）中。
+        drop_last (bool, 可选): 设置为 ``True`` 以丢弃最后一个不完整的 batch（如果数据集大小不能被 batch size 整除）。
+            如果是 ``False`` 且数据集大小不能被整除，则最后一个 batch 将会更小。（默认值：False）
+        timeout (numeric, 可选): 如果为正数，则为从 worker 手机 batch 的超时值。应始终为非负数。（默认值：0）
+        worker_init_fn (callable, 可选): 如果不为 None，这将在设置种子之后、数据加载之前，在每个子进程中被调用，
+            输入为 worker id（一个在 ``[0, num_workers - 1]`` 范围内的整数）。（默认值：None）
 
-    .. note:: By default, each worker will have its PyTorch seed set to
-              ``base_seed + worker_id``, where ``base_seed`` is a long generated
-              by main process using its RNG. However, seeds for other libraries
-              may be duplicated upon initializing workers (w.g., NumPy), causing
-              each worker to return identical random numbers. (See
-              :ref:`dataloader-workers-random-seed` section in FAQ.) You may
-              use ``torch.initial_seed()`` to access the PyTorch seed for each
-              worker in :attr:`worker_init_fn`, and use it to set other seeds
-              before data loading.
+    .. 注意:: 默认情况下，每个 worker 的 PyTorch 种子将被设置为 ``base_seed + worker_id``，
+              其中 ``base_seed`` 是主进程使用随机数生成器生成的长整型。然而，其他库的种子（例如 NumPy）
+              可能在初始化 worker 时重复，导致每个 worker 返回相同的随机数。
+              你可以使用 ``torch.initial_seed()`` 来访问每个 worker 的 PyTorch 种子，并在加载数据前设置其他种子。
 
-    .. warning:: If ``spawn`` start method is used, :attr:`worker_init_fn` cannot be an
-                 unpicklable object, e.g., a lambda function.
+    .. 警告:: 如果使用了 ``spawn`` 启动方法，:attr:`worker_init_fn` 不能是一个不可序列化（unpicklable）的对象，
+              例如 lambda 函数。
     """
 
     __initialized = False

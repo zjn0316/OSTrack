@@ -11,6 +11,7 @@ class EnvSettings:
         self.network_path = '{}/networks/'.format(test_path)
         self.result_plot_path = '{}/result_plots/'.format(test_path)
         self.otb_path = ''
+        self.otb100_uwb_path = ''  # OTB100_UWB dataset path
         self.nfs_path = ''
         self.uav_path = ''
         self.tpl_path = ''

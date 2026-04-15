@@ -8,31 +8,34 @@ import torchvision.transforms.functional as tvisf
 
 
 class Transform:
-    """A set of transformations, used for e.g. data augmentation.
-    Args of constructor:
-        transforms: An arbitrary number of transformations, derived from the TransformBase class.
-                    They are applied in the order they are given.
+    """
+    一组变换操作，常用于数据增强等场景。
+    构造函数参数：
+        transforms: 任意数量的变换操作，需继承自 TransformBase 类。它们会按给定顺序依次应用。
 
-    The Transform object can jointly transform images, bounding boxes and segmentation masks.
-    This is done by calling the object with the following key-word arguments (all are optional).
+    Transform 对象可以对图像、边界框和分割掩码进行联合变换。
+    只需以关键字参数方式调用该对象即可（所有参数均为可选）。
 
-    The following arguments are inputs to be transformed. They are either supplied as a single instance, or a list of instances.
-        image  -  Image
-        coords  -  2xN dimensional Tensor of 2D image coordinates [y, x]
-        bbox  -  Bounding box on the form [x, y, w, h]
-        mask  -  Segmentation mask with discrete classes
+    以下参数为待变换的输入，可以是单个实例，也可以是实例列表：
+        image  -  图像
+        coords  -  2xN 维的二维图像坐标张量 [y, x]
+        bbox  -  边界框，格式为 [x, y, w, h]
+        mask  -  离散类别的分割掩码
 
-    The following parameters can be supplied with calling the transform object:
-        joint [Bool]  -  If True then transform all images/coords/bbox/mask in the list jointly using the same transformation.
-                         Otherwise each tuple (images, coords, bbox, mask) will be transformed independently using
-                         different random rolls. Default: True.
-        new_roll [Bool]  -  If False, then no new random roll is performed, and the saved result from the previous roll
-                            is used instead. Default: True.
+    调用 transform 对象时可额外传入如下参数：
+        joint [Bool]  -  若为 True，则对列表中的所有 image/coords/bbox/mask 使用同一组随机参数进行联合变换。
+                         否则，每组 (images, coords, bbox, mask) 独立使用不同的随机参数进行变换。默认值：True。
+        new_roll [Bool]  -  若为 False，则不重新采样随机参数，直接复用上一次的结果。默认值：True。
 
-    Check the DiMPProcessing class for examples.
+    具体用法可参考 DiMPProcessing 类。
     """
 
     def __init__(self, *transforms):
+        """
+        初始化 Transform 类。
+        参数：
+            *transforms: 变换操作序列，依次应用。
+        """
         if len(transforms) == 1 and isinstance(transforms[0], (list, tuple)):
             transforms = transforms[0]
         self.transforms = transforms
@@ -41,6 +44,15 @@ class Transform:
         self._valid_all = self._valid_inputs + self._valid_args
 
     def __call__(self, **inputs):
+        """
+        调用该对象，对输入数据进行变换。
+        参数：
+            支持 image, coords, bbox, mask, att 等关键字参数。
+            joint/new_roll 控制变换方式。
+        返回：
+            变换后的数据，顺序与输入一致。
+        """
+        # 检查输入参数是否合法
         var_names = [k for k in inputs.keys() if k in self._valid_inputs]
         for v in inputs.keys():
             if v not in self._valid_all:
@@ -49,6 +61,7 @@ class Transform:
         joint_mode = inputs.get('joint', True)
         new_roll = inputs.get('new_roll', True)
 
+        # 单独变换
         if not joint_mode:
             out = zip(*[self(**inp) for inp in self._split_inputs(inputs)])
             return tuple(list(o) for o in out)
@@ -63,6 +76,12 @@ class Transform:
         return tuple(out[v] for v in var_names)
 
     def _split_inputs(self, inputs):
+        """
+        将输入按元素拆分成多个字典，便于分别处理每组数据。
+        参数：inputs - 输入数据字典
+        返回：
+            拆分后的输入字典列表
+        """
         var_names = [k for k in inputs.keys() if k in self._valid_inputs]
         split_inputs = [{k: v for k, v in zip(var_names, vals)} for vals in zip(*[inputs[vn] for vn in var_names])]
         for arg_name, arg_val in filter(lambda it: it[0]!='joint' and it[0] in self._valid_args, inputs.items()):
@@ -75,6 +94,9 @@ class Transform:
         return split_inputs
 
     def __repr__(self):
+        """
+        返回该变换对象的字符串表示，便于打印和调试。
+        """
         format_string = self.__class__.__name__ + '('
         for t in self.transforms:
             format_string += '\n'
@@ -86,18 +108,29 @@ class Transform:
 class TransformBase:
     """Base class for transformation objects. See the Transform class for details."""
     def __init__(self):
-        """2020.12.24 Add 'att' to valid inputs"""
+        """
+        初始化 TransformBase 类。
+        设置支持的输入类型和参数。
+        """
         self._valid_inputs = ['image', 'coords', 'bbox', 'mask', 'att']
         self._valid_args = ['new_roll']
         self._valid_all = self._valid_inputs + self._valid_args
         self._rand_params = None
 
     def __call__(self, **inputs):
-        # Split input
+        """
+        调用该对象，对输入数据进行变换。
+        参数：
+            支持 image, coords, bbox, mask, att 等关键字参数。
+            new_roll 控制是否重新采样随机参数。
+        返回：
+            变换后的数据字典。
+        """
+        # 拆分输入
         input_vars = {k: v for k, v in inputs.items() if k in self._valid_inputs}
         input_args = {k: v for k, v in inputs.items() if k in self._valid_args}
 
-        # Roll random parameters for the transform
+        # 采样随机参数
         if input_args.get('new_roll', True):
             rand_params = self.roll()
             if rand_params is None:
@@ -121,6 +154,11 @@ class TransformBase:
         return outputs
 
     def _get_image_size(self, inputs):
+        """
+        获取输入图像或掩码的尺寸。
+        参数：inputs - 输入数据字典
+        返回：(H, W) 或 None
+        """
         im = None
         for var_name in ['image', 'mask']:
             if inputs.get(var_name) is not None:
@@ -137,19 +175,36 @@ class TransformBase:
         raise Exception('Unknown image type')
 
     def roll(self):
+        """
+        采样本次变换所需的随机参数。
+        返回：
+            随机参数（可为 None/单值/元组）
+        """
         return None
 
     def transform_image(self, image, *rand_params):
-        """Must be deterministic"""
+        """
+        对图像进行变换。必须是确定性的。
+        参数：image - 输入图像，rand_params - 随机参数
+        返回：变换后的图像
+        """
         return image
 
     def transform_coords(self, coords, image_shape, *rand_params):
-        """Must be deterministic"""
+        """
+        对坐标进行变换。必须是确定性的。
+        参数：coords - 坐标，image_shape - 图像尺寸，rand_params - 随机参数
+        返回：变换后的坐标
+        """
         return coords
 
     def transform_bbox(self, bbox, image_shape, *rand_params):
-        """Assumes [x, y, w, h]"""
-        # Check if not overloaded
+        """
+        对边界框进行变换，假设格式为 [x, y, w, h]。
+        参数：bbox - 边界框，image_shape - 图像尺寸，rand_params - 随机参数
+        返回：变换后的边界框
+        """
+        # 检查是否重载了 transform_coords
         if self.transform_coords.__code__ == TransformBase.transform_coords.__code__:
             return bbox
 
@@ -170,11 +225,19 @@ class TransformBase:
         return bbox_out
 
     def transform_mask(self, mask, *rand_params):
-        """Must be deterministic"""
+        """
+        对掩码进行变换。必须是确定性的。
+        参数：mask - 掩码，rand_params - 随机参数
+        返回：变换后的掩码
+        """
         return mask
 
     def transform_att(self, att, *rand_params):
-        """2020.12.24 Added to deal with attention masks"""
+        """
+        对注意力掩码进行变换。
+        参数：att - 注意力掩码，rand_params - 随机参数
+        返回：变换后的注意力掩码
+        """
         return att
 
 

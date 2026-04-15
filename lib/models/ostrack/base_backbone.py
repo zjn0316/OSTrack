@@ -35,17 +35,20 @@ class BaseBackbone(nn.Module):
         self.add_sep_seg = False
 
     def finetune_track(self, cfg, patch_start_index=1):
-
-        search_size = to_2tuple(cfg.DATA.SEARCH.SIZE)
-        template_size = to_2tuple(cfg.DATA.TEMPLATE.SIZE)
-        new_patch_size = cfg.MODEL.BACKBONE.STRIDE
+        """ 对预训练权重进行微调以适应的输入尺寸和位置编码 """
+        # =====================
+        # 设置参数
+        # =====================
+        search_size = to_2tuple(cfg.DATA.SEARCH.SIZE)  # (256, 256)
+        template_size = to_2tuple(cfg.DATA.TEMPLATE.SIZE)  # (128, 128)
+        new_patch_size = cfg.MODEL.BACKBONE.STRIDE  # 16
 
         self.cat_mode = cfg.MODEL.BACKBONE.CAT_MODE
         self.return_inter = cfg.MODEL.RETURN_INTER
         self.return_stage = cfg.MODEL.RETURN_STAGES
         self.add_sep_seg = cfg.MODEL.BACKBONE.SEP_SEG
 
-        # resize patch embedding
+        # resize patch embedding（一般不进入）
         if new_patch_size != self.patch_size:
             print('Inconsistent Patch Size With The Pretrained Weights, Interpolate The Weight!')
             old_patch_embed = {}
@@ -61,44 +64,46 @@ class BaseBackbone(nn.Module):
             self.patch_embed.proj.weight = old_patch_embed['proj.weight']
 
         # for patch embedding
-        patch_pos_embed = self.pos_embed[:, patch_start_index:, :]
-        patch_pos_embed = patch_pos_embed.transpose(1, 2)
-        B, E, Q = patch_pos_embed.shape
-        P_H, P_W = self.img_size[0] // self.patch_size, self.img_size[1] // self.patch_size
-        patch_pos_embed = patch_pos_embed.view(B, E, P_H, P_W)
+        # 不包含 cls token patch 的位置编码
+        patch_pos_embed = self.pos_embed[:, patch_start_index:, :]  # [1, 196, 768]
+        # 交换维度，把 shape 从 (B, Q, E) 变成 (B, E, Q)，方便后续 reshape
+        patch_pos_embed = patch_pos_embed.transpose(1, 2)  # [1, 768, 196]
+        B, E, Q = patch_pos_embed.shape  # B=1, E=768, Q=196
+        # 224/16=14
+        P_H, P_W = self.img_size[0] // self.patch_size, self.img_size[1] // self.patch_size  # P_H=14, P_W=14
+        # 把一维的 patch 位置编码还原成二维网格，方便后续插值到新尺寸
+        patch_pos_embed = patch_pos_embed.view(B, E, P_H, P_W)  # [1, 768, 14, 14]
 
         # for search region
-        H, W = search_size
-        new_P_H, new_P_W = H // new_patch_size, W // new_patch_size
+        H, W = search_size  # 256, 256
+        new_P_H, new_P_W = H // new_patch_size, W // new_patch_size  # 16, 16
         search_patch_pos_embed = nn.functional.interpolate(patch_pos_embed, size=(new_P_H, new_P_W), mode='bicubic',
-                                                           align_corners=False)
-        search_patch_pos_embed = search_patch_pos_embed.flatten(2).transpose(1, 2)
+                                                           align_corners=False)  # [1, 768, 14, 14]->[1, 768, 16, 16]
+        search_patch_pos_embed = search_patch_pos_embed.flatten(2).transpose(1, 2)  # [1, 256, 768]
 
         # for template region
-        H, W = template_size
-        new_P_H, new_P_W = H // new_patch_size, W // new_patch_size
+        H, W = template_size  # 128, 128
+        new_P_H, new_P_W = H // new_patch_size, W // new_patch_size  # 8, 8
         template_patch_pos_embed = nn.functional.interpolate(patch_pos_embed, size=(new_P_H, new_P_W), mode='bicubic',
-                                                             align_corners=False)
-        template_patch_pos_embed = template_patch_pos_embed.flatten(2).transpose(1, 2)
+                                                             align_corners=False)  # [1, 768, 8, 8]
+        template_patch_pos_embed = template_patch_pos_embed.flatten(2).transpose(1, 2)  # [1, 64, 768]
 
-        self.pos_embed_z = nn.Parameter(template_patch_pos_embed)
-        self.pos_embed_x = nn.Parameter(search_patch_pos_embed)
+        self.pos_embed_z = nn.Parameter(template_patch_pos_embed)  # [1, 64, 768]
+        self.pos_embed_x = nn.Parameter(search_patch_pos_embed)  # [1, 256, 768]
 
         # for cls token (keep it but not used)
         if self.add_cls_token and patch_start_index > 0:
-            cls_pos_embed = self.pos_embed[:, 0:1, :]
-            self.cls_pos_embed = nn.Parameter(cls_pos_embed)
+            cls_pos_embed = self.pos_embed[:, 0:1, :]  # [1, 1, 768]
+            self.cls_pos_embed = nn.Parameter(cls_pos_embed)  # [1, 1, 768]
 
         # separate token and segment token
         if self.add_sep_seg:
-            self.template_segment_pos_embed = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
+            self.template_segment_pos_embed = nn.Parameter(torch.zeros(1, 1, self.embed_dim))  # [1, 1, 768]
             self.template_segment_pos_embed = trunc_normal_(self.template_segment_pos_embed, std=.02)
-            self.search_segment_pos_embed = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
+            self.search_segment_pos_embed = nn.Parameter(torch.zeros(1, 1, self.embed_dim))  # [1, 1, 768]
             self.search_segment_pos_embed = trunc_normal_(self.search_segment_pos_embed, std=.02)
 
-        # self.cls_token = None
-        # self.pos_embed = None
-
+        # 不进入
         if self.return_inter:
             for i_layer in self.return_stage:
                 if i_layer != 11:
@@ -108,37 +113,41 @@ class BaseBackbone(nn.Module):
                     self.add_module(layer_name, layer)
 
     def forward_features(self, z, x):
-        B, H, W = x.shape[0], x.shape[2], x.shape[3]
+        B, H, W = x.shape[0], x.shape[2], x.shape[3]  # B, H, W
 
-        x = self.patch_embed(x)
-        z = self.patch_embed(z)
+        # patch_embed
+        x = self.patch_embed(x)  # [B, 256, 768]
+        z = self.patch_embed(z)  # [B, 64, 768]
 
         if self.add_cls_token:
-            cls_tokens = self.cls_token.expand(B, -1, -1)
-            cls_tokens = cls_tokens + self.cls_pos_embed
+            cls_tokens = self.cls_token.expand(B, -1, -1)  # [B, 1, 768]
+            cls_tokens = cls_tokens + self.cls_pos_embed  # [B, 1, 768]
 
-        z += self.pos_embed_z
-        x += self.pos_embed_x
+        # patch_embed + pos_embed
+        z += self.pos_embed_z  # [B, 64, 768]
+        x += self.pos_embed_x  # [B, 256, 768]
 
         if self.add_sep_seg:
-            x += self.search_segment_pos_embed
-            z += self.template_segment_pos_embed
+            x += self.search_segment_pos_embed  # [B, 256, 768]
+            z += self.template_segment_pos_embed  # [B, 64, 768]
 
-        x = combine_tokens(z, x, mode=self.cat_mode)
+        # 合并模板和搜索区域的 token
+        x = combine_tokens(z, x, mode=self.cat_mode)  # [B, 320, 768]
         if self.add_cls_token:
-            x = torch.cat([cls_tokens, x], dim=1)
+            x = torch.cat([cls_tokens, x], dim=1)  # [B, 321, 768]
 
-        x = self.pos_drop(x)
+        x = self.pos_drop(x)  # [B, 320, 768]
 
+        # 经历Block
         for i, blk in enumerate(self.blocks):
-            x = blk(x)
+            x = blk(x)  # [B, 320, 768]
 
-        lens_z = self.pos_embed_z.shape[1]
-        lens_x = self.pos_embed_x.shape[1]
-        x = recover_tokens(x, lens_z, lens_x, mode=self.cat_mode)
+        lens_z = self.pos_embed_z.shape[1]  # 64
+        lens_x = self.pos_embed_x.shape[1]  # 256
+        x = recover_tokens(x, lens_z, lens_x, mode=self.cat_mode)  # [B, 256, 768]
 
         aux_dict = {"attn": None}
-        return self.norm(x), aux_dict
+        return self.norm(x), aux_dict  # [B, 256, 768]
 
     def forward(self, z, x, **kwargs):
         """

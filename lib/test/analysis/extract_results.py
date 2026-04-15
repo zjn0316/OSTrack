@@ -120,6 +120,7 @@ def extract_results(trackers, dataset, report_name, skip_missing_seq=False, plot
                                                dtype=torch.float32)
     ave_success_rate_plot_center_norm = torch.zeros((len(dataset), len(trackers), threshold_set_center.numel()),
                                                     dtype=torch.float32)
+    avg_fps = torch.zeros((len(dataset), len(trackers)), dtype=torch.float32)
 
     valid_sequence = torch.ones(len(dataset), dtype=torch.uint8)
 
@@ -131,6 +132,7 @@ def extract_results(trackers, dataset, report_name, skip_missing_seq=False, plot
             # Load results
             base_results_path = '{}/{}'.format(trk.results_dir, seq.name)
             results_path = '{}.txt'.format(base_results_path)
+            time_path = '{}_time.txt'.format(base_results_path)
 
             if os.path.isfile(results_path):
                 pred_bb = torch.tensor(load_text(str(results_path), delimiter=('\t', ','), dtype=np.float64))
@@ -140,6 +142,16 @@ def extract_results(trackers, dataset, report_name, skip_missing_seq=False, plot
                     break
                 else:
                     raise Exception('Result not found. {}'.format(results_path))
+
+            # Load FPS
+            if os.path.isfile(time_path):
+                exec_times = load_text(str(time_path), delimiter=('\t', ','), dtype=np.float64)
+                if len(exec_times) > 0:
+                    avg_fps[seq_id, trk_id] = 1.0 / np.mean(exec_times)
+                else:
+                    avg_fps[seq_id, trk_id] = 0.0
+            else:
+                avg_fps[seq_id, trk_id] = 0.0
 
             # Calculate measures
             err_overlap, err_center, err_center_normalized, valid_frame = calc_seq_err_robust(
@@ -172,6 +184,7 @@ def extract_results(trackers, dataset, report_name, skip_missing_seq=False, plot
                  'ave_success_rate_plot_center': ave_success_rate_plot_center.tolist(),
                  'ave_success_rate_plot_center_norm': ave_success_rate_plot_center_norm.tolist(),
                  'avg_overlap_all': avg_overlap_all.tolist(),
+                 'avg_fps': avg_fps.tolist(),
                  'threshold_set_overlap': threshold_set_overlap.tolist(),
                  'threshold_set_center': threshold_set_center.tolist(),
                  'threshold_set_center_norm': threshold_set_center_norm.tolist()}

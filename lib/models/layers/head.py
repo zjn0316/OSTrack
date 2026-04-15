@@ -103,25 +103,25 @@ class CenterPredictor(nn.Module, ):
         self.img_sz = self.feat_sz * self.stride
 
         # corner predict
-        self.conv1_ctr = conv(inplanes, channel, freeze_bn=freeze_bn)
-        self.conv2_ctr = conv(channel, channel // 2, freeze_bn=freeze_bn)
-        self.conv3_ctr = conv(channel // 2, channel // 4, freeze_bn=freeze_bn)
-        self.conv4_ctr = conv(channel // 4, channel // 8, freeze_bn=freeze_bn)
-        self.conv5_ctr = nn.Conv2d(channel // 8, 1, kernel_size=1)
+        self.conv1_ctr = conv(inplanes, channel, freeze_bn=freeze_bn)   # [B, 768, 16, 16]->[B, 256, 16, 16]
+        self.conv2_ctr = conv(channel, channel // 2, freeze_bn=freeze_bn)# [B, 256, 16, 16]->[B, 128, 16, 16]
+        self.conv3_ctr = conv(channel // 2, channel // 4, freeze_bn=freeze_bn)# [B, 128, 16, 16]->[B, 64, 16, 16]
+        self.conv4_ctr = conv(channel // 4, channel // 8, freeze_bn=freeze_bn)# [B, 64, 16, 16]->[B, 32, 16, 16]
+        self.conv5_ctr = nn.Conv2d(channel // 8, 1, kernel_size=1)# [B, 32, 16, 16]->[B, 1, 16, 16]
 
         # size regress
         self.conv1_offset = conv(inplanes, channel, freeze_bn=freeze_bn)
         self.conv2_offset = conv(channel, channel // 2, freeze_bn=freeze_bn)
         self.conv3_offset = conv(channel // 2, channel // 4, freeze_bn=freeze_bn)
         self.conv4_offset = conv(channel // 4, channel // 8, freeze_bn=freeze_bn)
-        self.conv5_offset = nn.Conv2d(channel // 8, 2, kernel_size=1)
+        self.conv5_offset = nn.Conv2d(channel // 8, 2, kernel_size=1)# [B, 32, 16, 16]->[B, 2, 16, 16]
 
         # size regress
         self.conv1_size = conv(inplanes, channel, freeze_bn=freeze_bn)
         self.conv2_size = conv(channel, channel // 2, freeze_bn=freeze_bn)
         self.conv3_size = conv(channel // 2, channel // 4, freeze_bn=freeze_bn)
         self.conv4_size = conv(channel // 4, channel // 8, freeze_bn=freeze_bn)
-        self.conv5_size = nn.Conv2d(channel // 8, 2, kernel_size=1)
+        self.conv5_size = nn.Conv2d(channel // 8, 2, kernel_size=1)# [B, 32, 16, 16]->[B, 2, 16, 16]
 
         for p in self.parameters():
             if p.dim() > 1:
@@ -129,28 +129,33 @@ class CenterPredictor(nn.Module, ):
 
     def forward(self, x, gt_score_map=None):
         """ Forward pass with input x. """
+        # 获取中心点热图、尺寸图和偏移图
         score_map_ctr, size_map, offset_map = self.get_score_map(x)
 
         # assert gt_score_map is None
+        # 推理阶段
         if gt_score_map is None:
             bbox = self.cal_bbox(score_map_ctr, size_map, offset_map)
+        # 训练阶段
         else:
             bbox = self.cal_bbox(gt_score_map.unsqueeze(1), size_map, offset_map)
 
         return score_map_ctr, bbox, size_map, offset_map
 
     def cal_bbox(self, score_map_ctr, size_map, offset_map, return_score=False):
+        # 获取中心点热图中的最大值和对应的索引
         max_score, idx = torch.max(score_map_ctr.flatten(1), dim=1, keepdim=True)
         idx_y = idx // self.feat_sz
         idx_x = idx % self.feat_sz
 
+        # 将索引扩展为 (batch, 2, 1)，以便在后续步骤中同时获取 x 和 y 方向的尺寸和偏移
         idx = idx.unsqueeze(1).expand(idx.shape[0], 2, 1)
+        # 取出[B, 2, 16, 16]中对应索引位置的尺寸和偏移值，得到 (batch, 2, 1) 的张量
         size = size_map.flatten(2).gather(dim=2, index=idx)
+        # 取出对应索引位置的偏移值，得到 (batch, 2) 的张量
         offset = offset_map.flatten(2).gather(dim=2, index=idx).squeeze(-1)
 
-        # bbox = torch.cat([idx_x - size[:, 0] / 2, idx_y - size[:, 1] / 2,
-        #                   idx_x + size[:, 0] / 2, idx_y + size[:, 1] / 2], dim=1) / self.feat_sz
-        # cx, cy, w, h
+        # [B, 4] = [B, 1] + [B, 1] + [B, 2]
         bbox = torch.cat([(idx_x.to(torch.float) + offset[:, :1]) / self.feat_sz,
                           (idx_y.to(torch.float) + offset[:, 1:]) / self.feat_sz,
                           size.squeeze(-1)], dim=1)
@@ -183,21 +188,21 @@ class CenterPredictor(nn.Module, ):
         x_ctr2 = self.conv2_ctr(x_ctr1)
         x_ctr3 = self.conv3_ctr(x_ctr2)
         x_ctr4 = self.conv4_ctr(x_ctr3)
-        score_map_ctr = self.conv5_ctr(x_ctr4)
+        score_map_ctr = self.conv5_ctr(x_ctr4)  # [B, 1, 16, 16]
 
         # offset branch
         x_offset1 = self.conv1_offset(x)
         x_offset2 = self.conv2_offset(x_offset1)
         x_offset3 = self.conv3_offset(x_offset2)
         x_offset4 = self.conv4_offset(x_offset3)
-        score_map_offset = self.conv5_offset(x_offset4)
+        score_map_offset = self.conv5_offset(x_offset4)  # [B, 2, 16, 16]
 
         # size branch
         x_size1 = self.conv1_size(x)
         x_size2 = self.conv2_size(x_size1)
         x_size3 = self.conv3_size(x_size2)
         x_size4 = self.conv4_size(x_size3)
-        score_map_size = self.conv5_size(x_size4)
+        score_map_size = self.conv5_size(x_size4)  # [B, 2, 16, 16]
         return _sigmoid(score_map_ctr), _sigmoid(score_map_size), score_map_offset
 
 
@@ -222,13 +227,13 @@ class MLP(nn.Module):
 
 
 def build_box_head(cfg, hidden_dim):
-    stride = cfg.MODEL.BACKBONE.STRIDE
+    stride = cfg.MODEL.BACKBONE.STRIDE  # 16
 
     if cfg.MODEL.HEAD.TYPE == "MLP":
         mlp_head = MLP(hidden_dim, hidden_dim, 4, 3)  # dim_in, dim_hidden, dim_out, 3 layers
         return mlp_head
     elif "CORNER" in cfg.MODEL.HEAD.TYPE:
-        feat_sz = int(cfg.DATA.SEARCH.SIZE / stride)
+        feat_sz = int(cfg.DATA.SEARCH.SIZE / stride)  # 256 / 16 = 16
         channel = getattr(cfg.MODEL, "NUM_CHANNELS", 256)
         print("head channel: %d" % channel)
         if cfg.MODEL.HEAD.TYPE == "CORNER":
@@ -238,9 +243,9 @@ def build_box_head(cfg, hidden_dim):
             raise ValueError()
         return corner_head
     elif cfg.MODEL.HEAD.TYPE == "CENTER":
-        in_channel = hidden_dim
-        out_channel = cfg.MODEL.HEAD.NUM_CHANNELS
-        feat_sz = int(cfg.DATA.SEARCH.SIZE / stride)
+        in_channel = hidden_dim  # 768 (VisionTransformer embed_dim)
+        out_channel = cfg.MODEL.HEAD.NUM_CHANNELS  # 256
+        feat_sz = int(cfg.DATA.SEARCH.SIZE / stride)  # 256 / 16 = 16
         center_head = CenterPredictor(inplanes=in_channel, channel=out_channel,
                                       feat_sz=feat_sz, stride=stride)
         return center_head

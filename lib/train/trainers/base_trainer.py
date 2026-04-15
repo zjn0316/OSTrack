@@ -60,44 +60,67 @@ class BaseTrainer:
             self._checkpoint_dir = None
 
     def train(self, max_epochs, load_latest=False, fail_safe=True, load_previous_ckpt=False, distill=False):
-        """Do training for the given number of epochs.
-        args:
-            max_epochs - Max number of training epochs,
-            load_latest - Bool indicating whether to resume from latest epoch.
-            fail_safe - Bool indicating whether the training to automatically restart in case of any crashes.
+        """执行指定轮数的训练。
+        参数:
+            max_epochs - 最大训练轮数
+            load_latest - 是否从最新的 checkpoint 恢复训练
+            fail_safe - 训练崩溃时是否自动重启
+            load_previous_ckpt - 是否加载之前的 checkpoint
+            distill - 是否执行蒸馏训练（加载教师模型）
         """
 
         epoch = -1
         num_tries = 1
         for i in range(num_tries):
             try:
+                # ====================
+                # 加载权重与状态
+                # ====================
                 if load_latest:
+                    # 从当前项目的最新 checkpoint 恢复
                     self.load_checkpoint()
                 if load_previous_ckpt:
+                    # 从项目定义的先前路径加载权重
                     directory = '{}/{}'.format(self._checkpoint_dir, self.settings.project_path_prv)
                     self.load_state_dict(directory)
                 if distill:
+                    # 加载教师模型权重（用于知识蒸馏）
                     directory_teacher = '{}/{}'.format(self._checkpoint_dir, self.settings.project_path_teacher)
                     self.load_state_dict(directory_teacher, distill=True)
+
+                # ====================
+                # 主训练循环
+                # ====================
                 for epoch in range(self.epoch+1, max_epochs+1):
                     self.epoch = epoch
 
+                    # 训练单个 Epoch
                     self.train_epoch()
 
+                    # ====================
+                    # 学习率调度更新
+                    # ====================
                     if self.lr_scheduler is not None:
                         if self.settings.scheduler_type != 'cosine':
                             self.lr_scheduler.step()
                         else:
                             self.lr_scheduler.step(epoch - 1)
-                    # only save the last 10 checkpoints
+
+                    # ====================
+                    # 保存权重 (Checkpoint)
+                    # ====================
+                    # 设置特定的保存节点（例如：最后一轮、每40轮、或指定的特殊轮数）
                     save_every_epoch = getattr(self.settings, "save_every_epoch", False)
                     save_epochs = [79, 159, 239]
                     if epoch > (max_epochs - 1) or save_every_epoch or epoch % 40 == 0 or epoch in save_epochs or epoch > (max_epochs - 5):
-                    # if epoch > (max_epochs - 10) or save_every_epoch or epoch % 100 == 0:
                         if self._checkpoint_dir:
+                            # 仅在主进程中执行保存操作
                             if self.settings.local_rank in [-1, 0]:
                                 self.save_checkpoint()
             except:
+                # ====================
+                # 故障处理 (Fail-safe)
+                # ====================
                 print('Training crashed at epoch {}'.format(epoch))
                 if fail_safe:
                     self.epoch -= 1

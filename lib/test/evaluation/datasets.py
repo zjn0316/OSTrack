@@ -8,6 +8,7 @@ pt = "lib.test.evaluation.%sdataset"  # Useful abbreviations to reduce the clutt
 
 dataset_dict = dict(
     otb=DatasetInfo(module=pt % "otb", class_name="OTBDataset", kwargs=dict()),
+    otb100_uwb=DatasetInfo(module=pt % "otb100uwb", class_name="OTB100UWBDataset", kwargs=dict(split='test')),
     nfs=DatasetInfo(module=pt % "nfs", class_name="NFSDataset", kwargs=dict()),
     uav=DatasetInfo(module=pt % "uav", class_name="UAVDataset", kwargs=dict()),
     tc128=DatasetInfo(module=pt % "tc128", class_name="TC128Dataset", kwargs=dict()),

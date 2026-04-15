@@ -48,11 +48,13 @@ def merge_multiple_runs(eval_data):
     ave_success_rate_plot_center_merged = []
     ave_success_rate_plot_center_norm_merged = []
     avg_overlap_all_merged = []
+    avg_fps_merged = []
 
     ave_success_rate_plot_overlap = torch.tensor(eval_data['ave_success_rate_plot_overlap'])
     ave_success_rate_plot_center = torch.tensor(eval_data['ave_success_rate_plot_center'])
     ave_success_rate_plot_center_norm = torch.tensor(eval_data['ave_success_rate_plot_center_norm'])
     avg_overlap_all = torch.tensor(eval_data['avg_overlap_all'])
+    avg_fps = torch.tensor(eval_data['avg_fps'])
 
     trackers = eval_data['trackers']
     merged = torch.zeros(len(trackers), dtype=torch.uint8)
@@ -69,6 +71,7 @@ def merge_multiple_runs(eval_data):
         ave_success_rate_plot_center_merged.append(ave_success_rate_plot_center[:, match, :].mean(1))
         ave_success_rate_plot_center_norm_merged.append(ave_success_rate_plot_center_norm[:, match, :].mean(1))
         avg_overlap_all_merged.append(avg_overlap_all[:, match].mean(1))
+        avg_fps_merged.append(avg_fps[:, match].mean(1))
 
         merged[match] = 1
 
@@ -76,11 +79,13 @@ def merge_multiple_runs(eval_data):
     ave_success_rate_plot_center_merged = torch.stack(ave_success_rate_plot_center_merged, dim=1)
     ave_success_rate_plot_center_norm_merged = torch.stack(ave_success_rate_plot_center_norm_merged, dim=1)
     avg_overlap_all_merged = torch.stack(avg_overlap_all_merged, dim=1)
+    avg_fps_merged = torch.stack(avg_fps_merged, dim=1)
 
     eval_data['trackers'] = new_tracker_names
     eval_data['ave_success_rate_plot_overlap'] = ave_success_rate_plot_overlap_merged.tolist()
     eval_data['ave_success_rate_plot_center'] = ave_success_rate_plot_center_merged.tolist()
     eval_data['ave_success_rate_plot_center_norm'] = ave_success_rate_plot_center_norm_merged.tolist()
+    eval_data['avg_fps'] = avg_fps_merged.tolist()
     eval_data['avg_overlap_all'] = avg_overlap_all_merged.tolist()
 
     return eval_data
@@ -178,6 +183,9 @@ def check_and_load_precomputed_results(trackers, dataset, report_name, force_eva
     if os.path.isfile(eval_data_path) and not force_evaluation:
         with open(eval_data_path, 'rb') as fh:
             eval_data = pickle.load(fh)
+        if 'avg_fps' not in eval_data:
+            print('Updating pre-computed evaluation data to include FPS...')
+            eval_data = extract_results(trackers, dataset, report_name, **kwargs)
     else:
         # print('Pre-computed evaluation data not found. Computing results!')
         eval_data = extract_results(trackers, dataset, report_name, **kwargs)
@@ -366,6 +374,10 @@ def print_results(trackers, dataset, report_name, merge_results=False,
         # Index out valid sequences
         norm_prec_curve, norm_prec_score = get_prec_curve(ave_success_rate_plot_center_norm, valid_sequence)
         scores['Norm Precision'] = norm_prec_score
+
+    # ********************************  FPS *********************************
+    avg_fps = torch.tensor(eval_data['avg_fps'])
+    scores['FPS'] = avg_fps[valid_sequence, :].mean(0)
 
     # Print
     tracker_disp_names = [get_tracker_display_name(trk) for trk in tracker_names]

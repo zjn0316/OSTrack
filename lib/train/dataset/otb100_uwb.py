@@ -1,89 +1,49 @@
 import os
 import os.path
-import torch
+import random
+from collections import OrderedDict
+
 import numpy as np
 import pandas
-from collections import OrderedDict
+import torch
+
 from .base_video_dataset import BaseVideoDataset
 from lib.train.data import jpeg4py_loader
 from lib.train.admin import env_settings
 
 
 class OTB100UWB(BaseVideoDataset):
-    """ OTB100_UWB dataset (视觉部分).
-    
-    这是 OTB100 的增强版本，包含 UWB 传感器数据。
-    本接口仅使用视觉部分（groundtruth.txt），忽略 UWB 数据。
-    
-    数据集结构:
-    data/OTB100_UWB/
-    ├── train/
-    │   ├── Biker/
-    │   │   ├── 00000001.jpg
-    │   │   ├── groundtruth.txt
-    │   │   └── list.txt
-    │   ├── ...
-    ├── val/
-    └── test/
-    """
 
-    def __init__(self, root=None, image_loader=jpeg4py_loader, split='train', data_fraction=None):
-        """
-        args:
-            root - path to the OTB100_UWB dataset.
-            image_loader (jpeg4py_loader) - The function to read the images.
-            split - 'train', 'val', or 'test'
-            data_fraction - Fraction of dataset to be used. None means use all.
-        """
+    def __init__(self, root=None, image_loader=jpeg4py_loader, split='train', seq_ids=None,
+                 data_fraction=None, uwb_seq_len=5):
+
         root = env_settings().otb100_uwb_dir if root is None else root
         super().__init__('OTB100UWB', root, image_loader)
 
         self.split = split
-        
-        # 根据 split 设置路径
-        if split == 'train':
-            self.split_path = os.path.join(root, 'train')
-        elif split == 'val':
-            self.split_path = os.path.join(root, 'val')
-        elif split == 'test':
-            self.split_path = os.path.join(root, 'test')
-        else:
-            raise ValueError(f'Unknown split: {split}')
+        self.split_root = os.path.join(self.root, self.split)
+        self.uwb_seq_len = uwb_seq_len
 
-        # 读取序列列表
-        self.sequence_list = self._build_sequence_list()
+        self.sequence_list = self._get_sequence_list()
+
+        if seq_ids is None:
+            seq_ids = list(range(0, len(self.sequence_list)))
+
+        self.sequence_list = [self.sequence_list[i] for i in seq_ids]
 
         if data_fraction is not None:
-            import random
-            self.sequence_list = random.sample(self.sequence_list, 
-                                              int(len(self.sequence_list) * data_fraction))
+            self.sequence_list = random.sample(self.sequence_list, int(len(self.sequence_list) * data_fraction))
 
-        self.seq_per_class = self._build_class_list()
-
-    def _build_sequence_list(self):
-        """从 list.txt 读取序列列表"""
-        list_file = os.path.join(self.split_path, 'list.txt')
-        if os.path.exists(list_file):
-            sequence_list = pandas.read_csv(list_file, header=None).squeeze("columns").values.tolist()
-        else:
-            # 如果 list.txt 不存在，直接列出目录
-            sequence_list = [f for f in os.listdir(self.split_path) 
-                           if os.path.isdir(os.path.join(self.split_path, f))]
-        
-        return sequence_list
-
-    def _build_class_list(self):
-        """构建类别列表（OTB中每个序列视为一个类别）"""
-        seq_per_class = {}
-        for seq_id, seq_name in enumerate(self.sequence_list):
-            seq_per_class[seq_name] = [seq_id]
-        return seq_per_class
+        self.sequence_meta_info = self._load_meta_info()
+        self.seq_per_class = self._build_seq_per_class()
+        self.class_list = list(self.seq_per_class.keys())
+        self.class_list.sort()
 
     def get_name(self):
         return 'otb100_uwb'
 
     def has_class_info(self):
-        return False
+        return True
 
     def has_occlusion_info(self):
         return True
@@ -92,101 +52,187 @@ class OTB100UWB(BaseVideoDataset):
         return len(self.sequence_list)
 
     def get_num_classes(self):
-        return len(self.seq_per_class)
+        return len(self.class_list)
 
-    def _read_bb_anno(self, seq_path):
-        """读取 groundtruth.txt 标注"""
-        bb_anno_file = os.path.join(seq_path, 'groundtruth.txt')
-        
-        if not os.path.exists(bb_anno_file):
-            raise FileNotFoundError(f'Annotation file not found: {bb_anno_file}')
-        
-        # OTB 格式可能是逗号、空格或Tab分隔
-        try:
-            gt = pandas.read_csv(bb_anno_file, delimiter=',', header=None, dtype=np.float32,
-                               na_filter=False, low_memory=False).values
-        except:
-            try:
-                gt = pandas.read_csv(bb_anno_file, delimiter='\t', header=None, dtype=np.float32,
-                                   na_filter=False, low_memory=False).values
-            except:
-                gt = pandas.read_csv(bb_anno_file, delim_whitespace=True, header=None, dtype=np.float32,
-                                   na_filter=False, low_memory=False).values
-        
-        # 处理可能的缺失值
-        gt = np.array(gt, dtype=np.float32)
-        
-        return torch.tensor(gt)
+    def get_sequences_in_class(self, class_name):
+        return self.seq_per_class[class_name]
 
-    def _read_target_visible(self, seq_path):
-        """读取遮挡标注（如果有）"""
-        occlusion_file = os.path.join(seq_path, 'occlusion.txt')
-        if os.path.exists(occlusion_file):
-            try:
-                occlusion = pandas.read_csv(occlusion_file, header=None, dtype=np.int32).values
-                return torch.tensor(occlusion.flatten(), dtype=torch.int32)
-            except:
-                pass
-        
-        # 如果没有 occlusion.txt，返回全1（全部可见）
-        bb_anno = self._read_bb_anno(seq_path)
-        return torch.ones(bb_anno.shape[0], dtype=torch.int32)
+    def _get_sequence_list(self):
+        list_file = os.path.join(self.split_root, 'list.txt')
 
-    def _get_image_path(self, seq_path, frame_id):
-        """获取图像路径"""
-        # OTB100_UWB 使用 8 位数字编号，从 1 开始
-        img_filename = f'{frame_id + 1:08d}.jpg'
-        return os.path.join(seq_path, img_filename)
-
-    def get_sequence_info(self, seq_id):
-        seq_path = os.path.join(self.split_path, self.sequence_list[seq_id])
-        
-        bbox = self._read_bb_anno(seq_path)
-        
-        # OTB 格式: x, y, w, h (左上角坐标 + 宽高)
-        if bbox.shape[1] == 4:
-            # 已经是 x, y, w, h 格式
-            pass
-        elif bbox.shape[1] == 2:
-            raise ValueError('Invalid bbox format: expected 4 columns (x, y, w, h)')
+        if os.path.isfile(list_file):
+            sequence_list = pandas.read_csv(list_file, header=None).squeeze("columns").values.tolist()
         else:
-            raise ValueError(f'Invalid bbox shape: {bbox.shape}')
-        
-        valid = (bbox[:, 2] > 0) & (bbox[:, 3] > 0)
-        visible = self._read_target_visible(seq_path) & valid.byte()
+            sequence_list = [d for d in sorted(os.listdir(self.split_root))
+                             if os.path.isdir(os.path.join(self.split_root, d))]
 
-        return {'bbox': bbox, 'valid': valid, 'visible': visible}
+        return sequence_list
 
-    def _get_frame(self, seq_path, frame_id):
-        """获取单帧图像"""
-        img_path = self._get_image_path(seq_path, frame_id)
-        img = self.image_loader(img_path)
-        return img
+    def _load_meta_info(self):
+        sequence_meta_info = {s: self._build_meta_info(s) for s in self.sequence_list}
+        return sequence_meta_info
 
-    def get_frames(self, seq_id, frame_ids, anno=None):
-        seq_path = os.path.join(self.split_path, self.sequence_list[seq_id])
-        
-        obj_class = self.sequence_list[seq_id]
-        
-        # 获取图像帧
-        frame_list = [self._get_frame(seq_path, f_id) for f_id in frame_ids]
-        
-        if anno is None:
-            anno = self.get_sequence_info(seq_id)
-        
-        # 构建输出
-        anno_frames = {}
-        for key, value in anno.items():
-            # 处理一维和二维张量
-            if value.dim() == 1:
-                anno_frames[key] = [value[f_id].clone() for f_id in frame_ids]
-            else:
-                anno_frames[key] = [value[f_id, :].clone() for f_id in frame_ids]
-        
-        object_meta = OrderedDict({'object_class_name': obj_class,
+    def _build_meta_info(self, seq_name):
+        object_meta = OrderedDict({'object_class_name': seq_name,
                                    'motion_class': None,
                                    'major_class': None,
                                    'root_class': None,
                                    'motion_adverb': None})
+        return object_meta
 
-        return frame_list, anno_frames, object_meta
+    def _build_seq_per_class(self):
+        seq_per_class = {}
+
+        for i, s in enumerate(self.sequence_list):
+            object_class = self.sequence_meta_info[s]['object_class_name']
+            if object_class in seq_per_class:
+                seq_per_class[object_class].append(i)
+            else:
+                seq_per_class[object_class] = [i]
+
+        return seq_per_class
+
+    def _get_sequence_path(self, seq_id):
+        return os.path.join(self.split_root, self.sequence_list[seq_id])
+
+    def _get_frame_path(self, seq_path, frame_id):
+        return os.path.join(seq_path, '{:08}.jpg'.format(frame_id + 1))    # frames start from 1
+
+    def _get_frame(self, seq_path, frame_id):
+        return self.image_loader(self._get_frame_path(seq_path, frame_id))
+
+    def get_class_name(self, seq_id):
+        obj_meta = self.sequence_meta_info[self.sequence_list[seq_id]]
+        return obj_meta['object_class_name']
+    
+    def _read_occlusion_anno(self, seq_path):
+        occlusion_file = os.path.join(seq_path, "occlusion.txt")
+        occlusion = pandas.read_csv(occlusion_file, header=None, dtype=np.float32, na_filter=False, low_memory=False).values.reshape(-1)
+        return torch.tensor(occlusion, dtype=torch.float32)
+    
+    def _read_target_visible(self, seq_path):
+        occlusion = self._read_occlusion_anno(seq_path)
+
+        occlusion = (occlusion > 0).byte()
+        target_visible = ~occlusion
+        visible_ratio = 1.0 - occlusion.float()
+
+        return target_visible, visible_ratio
+
+    def _read_bb_anno(self, seq_path):
+        bb_anno_file = os.path.join(seq_path, "groundtruth.txt")
+        gt = pandas.read_csv(bb_anno_file, delimiter=',', header=None, dtype=np.float32, na_filter=False, low_memory=False).values
+        return torch.tensor(gt)
+
+    def _read_uwb_gt_anno(self, seq_path):
+        uwb_gt_file = os.path.join(seq_path, "uwb_gt.txt")
+        uwb_gt = pandas.read_csv(uwb_gt_file, delimiter=',', header=None, dtype=np.float32, na_filter=False, low_memory=False).values
+        return torch.tensor(uwb_gt, dtype=torch.float32)
+
+    def _read_uwb_noise_anno(self, seq_path):
+        uwb_noise_file = os.path.join(seq_path, "uwb_noise.txt")
+        uwb_noise = pandas.read_csv(uwb_noise_file, delimiter=',', header=None, dtype=np.float32, na_filter=False, low_memory=False).values
+        return torch.tensor(uwb_noise, dtype=torch.float32)
+
+
+    def _build_uwb_seq(self, seq_path, uwb):
+        uv = uwb[:, :2]
+        uwb_seq = []
+
+        for frame_id in range(uv.shape[0]):
+            seq_list = []
+            for i in range(self.uwb_seq_len):
+                hist_id = frame_id - self.uwb_seq_len + 1 + i
+                if hist_id < 0:
+                    hist_id = 0
+                seq_list.append(uv[hist_id])
+
+            uwb_seq.append(torch.stack(seq_list))
+
+        return torch.stack(uwb_seq)
+
+
+    
+    def _read_alpha_gt_anno(self, seq_path):
+        alpha_file = os.path.join(seq_path, "alpha_gt.txt")
+        alpha = pandas.read_csv(alpha_file, header=None, dtype=np.float32, na_filter=False, low_memory=False).values.reshape(-1)
+        return torch.tensor(alpha, dtype=torch.float32)
+    
+    def get_sequence_info(self, seq_id):
+        seq_path = self._get_sequence_path(seq_id)
+        bbox = self._read_bb_anno(seq_path)
+
+        valid = (bbox[:, 2] > 0) & (bbox[:, 3] > 0)
+        visible, visible_ratio = self._read_target_visible(seq_path)
+
+        uwb_gt = self._read_uwb_gt_anno(seq_path)
+        uwb_noise = self._read_uwb_noise_anno(seq_path)
+        uwb_seq = self._build_uwb_seq(seq_path, uwb_noise)
+
+        alpha_gt = self._read_alpha_gt_anno(seq_path)
+
+
+        return {
+            'bbox': bbox,
+            'valid': valid,
+            'visible': visible,
+            'visible_ratio': visible_ratio,
+            'uwb_gt': uwb_gt,
+            'uwb_noise': uwb_noise,
+            'uwb_seq': uwb_seq,
+            'alpha_gt': alpha_gt,
+        }
+
+    def get_frames(self, seq_id, frame_ids, anno=None):
+        seq_path = self._get_sequence_path(seq_id)
+        obj_meta = self.sequence_meta_info[self.sequence_list[seq_id]]
+
+        frame_list = [self._get_frame(seq_path, f_id) for f_id in frame_ids]
+
+        if anno is None:
+            anno = self.get_sequence_info(seq_id)
+
+        anno_frames = {}
+        for key, value in anno.items():
+            anno_frames[key] = [value[f_id, ...].clone() for f_id in frame_ids]
+
+        return frame_list, anno_frames, obj_meta
+
+"""
+调用教程 (Usage Tutorial):
+
+OTB100UWB 数据集类主要由训练框架中的采样器 (Sampler) 调用。其核心数据流如下：
+1. 采样器通过 `get_sequence_info` 获取整个视频序列的所有标注张量。
+2. 采样器根据选定的帧索引 (frame_ids)，调用 `get_frames` 提取对应帧的图像和标注切片。
+
+示例代码 (Example Usage):
+--------------------------------------------------
+from lib.train.dataset.otb100_uwb import OTB100UWB
+from lib.train.data import jpeg4py_loader
+
+# 1. 实例化数据集
+# root: 数据集根目录，包含 train/val/test 文件夹
+dataset = OTB100UWB(root='data/OTB100_UWB', split='train', uwb_seq_len=5)
+
+# 2. 获取序列索引及其基本信息
+seq_id = 0
+seq_name = dataset.sequence_list[seq_id]
+print(f"Loading sequence: {seq_name}")
+
+# 3. 获取完整序列标注 (通常由 Sampler 内部缓存)
+seq_info = dataset.get_sequence_info(seq_id)
+# 返回值字段包括: bbox[N,4], valid[N], visible[N], uwb_gt[N,5], uwb_noise[N,5], uwb_seq[N,5,2], alpha_gt[N]
+
+# 4. 提取特定帧的数据 (模拟一次训练采样)
+frame_ids = [0, 50, 100]  # 请求第1帧、第51帧和第101帧
+frame_list, anno_frames, obj_meta = dataset.get_frames(seq_id, frame_ids, anno=seq_info)
+
+# 数据结构说明:
+# - frame_list: 包含 3 张图像数组的列表 [img, img, img]
+# - anno_frames: 标注字典，每个 key 对应长度为 3 的列表。
+#   例如: anno_frames['bbox'][0] 是第1帧的 [x, y, w, h] Tensor。
+#         anno_frames['uwb_seq'][0] 是第1帧对应的 [5, 2] 历史 UWB 序列。
+#         anno_frames['alpha_gt'][0] 是第1帧的 alpha 比例标量。
+# - obj_meta: 包含序列元数据，如 {'object_class_name': 'Panda', ...}
+--------------------------------------------------
+"""

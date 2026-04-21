@@ -158,8 +158,8 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 .idea/
 
-lib/train/admin/local.py
-lib/test/evaluation/local.py
+# lib/train/admin/local.py
+# lib/test/evaluation/local.py
 ltr/run_ltr_local.py
 ltr/train_settings/*/debug.py
 pytracking/parameter/*/debug.py

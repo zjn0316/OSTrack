@@ -46,7 +46,7 @@
 | **NumPy** | 1.24.3 |
 | **其他依赖** | 已全部安装 |
 
-**Miniconda 路径**: `D:\DeepLearning\Miniconda`
+**Miniconda 路径**: `D:\Miniconda`
 
 ### 激活环境
 
@@ -86,7 +86,7 @@ CUDA: True
 
 **已配置的目录结构**：
 ```
-D:\DeepLearning\OSTrack/
+D:\OSTrack/
 ├── data/                          # 数据集目录
 ├── output/                        # 输出目录
 │   ├── checkpoints/               # 模型检查点
@@ -104,10 +104,10 @@ D:\DeepLearning\OSTrack/
 
 | 路径类型 | 配置值 |
 |---------|--------|
-| 工作目录 | `D:\DeepLearning\OSTrack` |
-| 数据目录 | `D:\DeepLearning\OSTrack\data` |
-| 输出目录 | `D:\DeepLearning\OSTrack\output` |
-| 预训练模型 | `D:\DeepLearning\OSTrack\pretrained_models` |
+| 工作目录 | `D:\OSTrack` |
+| 数据目录 | `D:\OSTrack\data` |
+| 输出目录 | `D:\OSTrack\output` |
+| 预训练模型 | `D:\OSTrack\pretrained_models` |
 
 **注意**：所有路径已使用 Windows 原生格式（反斜杠 `\`），并添加了 raw string 前缀 `r''` 避免转义问题。
 
@@ -481,7 +481,7 @@ python tracking/train.py --script ostrack --config vitb_256_otb100uwb_test ...
 **验证环境已激活**:
 ```powershell
 # 看到命令行前面有 (ostrack) 前缀
-(ostrack) PS D:\DeepLearning\OSTrack>
+(ostrack) PS D:\OSTrack>
 
 # 或者检查 Python 版本
 python --version

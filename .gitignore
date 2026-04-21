@@ -180,3 +180,5 @@ output_smoke*/
 *.pth.tar
 *.pt
 *.ckpt
+doc/UG-OSTrack.md
+doc/ugtrack.md

@@ -112,7 +112,7 @@ class BaseBackbone(nn.Module):
                     layer_name = f'norm{i_layer}'
                     self.add_module(layer_name, layer)
 
-    def forward_features(self, z, x):
+    def forward_features(self, z, x, uwb_token=None):
         B, H, W = x.shape[0], x.shape[2], x.shape[3]  # B, H, W
 
         # patch_embed
@@ -135,12 +135,21 @@ class BaseBackbone(nn.Module):
         x = combine_tokens(z, x, mode=self.cat_mode)  # [B, 320, 768]
         if self.add_cls_token:
             x = torch.cat([cls_tokens, x], dim=1)  # [B, 321, 768]
+        if uwb_token is not None:
+            if uwb_token.ndim == 2:
+                uwb_token = uwb_token.unsqueeze(1)
+            if uwb_token.ndim != 3 or uwb_token.shape[0] != B or uwb_token.shape[-1] != self.embed_dim:
+                raise ValueError("uwb_token must have shape [B, 1, embed_dim]")
+            x = torch.cat([x, uwb_token], dim=1)
 
         x = self.pos_drop(x)  # [B, 320, 768]
 
         # 经历Block
         for i, blk in enumerate(self.blocks):
             x = blk(x)  # [B, 320, 768]
+
+        if uwb_token is not None:
+            x = x[:, :-uwb_token.shape[1], :]
 
         lens_z = self.pos_embed_z.shape[1]  # 64
         lens_x = self.pos_embed_x.shape[1]  # 256
@@ -160,6 +169,6 @@ class BaseBackbone(nn.Module):
             x (torch.Tensor): merged template and search region feature, [B, L_z+L_x, C]
             attn : None
         """
-        x, aux_dict = self.forward_features(z, x,)
+        x, aux_dict = self.forward_features(z, x, uwb_token=kwargs.get("uwb_token"))
 
         return x, aux_dict

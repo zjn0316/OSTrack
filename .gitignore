@@ -173,3 +173,10 @@ data/
 output/
 pretrained_models/
 script/
+tensorboard/
+output_smoke*/
+**/checkpoints/
+*.pth
+*.pth.tar
+*.pt
+*.ckpt

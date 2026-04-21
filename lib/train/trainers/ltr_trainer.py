@@ -198,8 +198,10 @@ class LTRTrainer(BaseTrainer):
         self.num_frames += batch_size
         current_time = time.time()
         # 计算当前 batch 的 FPS 和整个 Epoch 的平均 FPS
-        batch_fps = batch_size / (current_time - self.prev_time)
-        average_fps = self.num_frames / (current_time - self.start_time)
+        batch_time = max(current_time - self.prev_time, 1e-12)
+        epoch_time = max(current_time - self.start_time, 1e-12)
+        batch_fps = batch_size / batch_time
+        average_fps = self.num_frames / epoch_time
         prev_frame_time_backup = self.prev_time
         self.prev_time = current_time
 
@@ -216,7 +218,7 @@ class LTRTrainer(BaseTrainer):
             # 打印详细耗时统计
             print_str += 'DataTime: %.3f (%.3f)  ,  ' % (self.avg_date_time / self.num_frames * batch_size, self.avg_gpu_trans_time / self.num_frames * batch_size)
             print_str += 'ForwardTime: %.3f  ,  ' % (self.avg_forward_time / self.num_frames * batch_size)
-            print_str += 'TotalTime: %.3f  ,  ' % ((current_time - self.start_time) / self.num_frames * batch_size)
+            print_str += 'TotalTime: %.3f  ,  ' % (epoch_time / self.num_frames * batch_size)
 
             # 打印各项 Loss 和指标的平均值
             for name, val in self.stats[loader.name].items():

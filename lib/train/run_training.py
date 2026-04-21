@@ -19,7 +19,13 @@ import lib.train.admin.settings as ws_settings
 # 全局 CUDNN 设置 (默认关闭 benchmark 以保证初始状态受控)
 torch.backends.cudnn.benchmark = False
 
-# 加载配置参数，设置文件路径，启动训练脚本lib\train\train_script.py
+TRAIN_SCRIPT_REGISTRY = {
+    "ostrack": "lib.train.train_script",
+    "ugtrack": "lib.train.train_script_ugtrack",
+}
+
+
+# 加载配置参数，设置文件路径，启动训练脚本
 def init_seeds(seed):
     random.seed(seed)
     np.random.seed(seed)
@@ -108,8 +114,11 @@ def run_training(script_name, config_name, cudnn_benchmark=True, local_rank=-1, 
         # 动态导入蒸馏训练模块
         expr_module = importlib.import_module('lib.train.train_script_distill')
     else:
-        # 动态导入常规训练模块
-        expr_module = importlib.import_module('lib.train.train_script')
+        # 动态导入常规训练模块。运行前需要先在终端执行: conda activate ostrack
+        expr_module_name = TRAIN_SCRIPT_REGISTRY.get(script_name)
+        if expr_module_name is None:
+            raise ValueError("Unsupported script name: {}".format(script_name))
+        expr_module = importlib.import_module(expr_module_name)
 
     # ====================
     # 执行训练

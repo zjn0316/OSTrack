@@ -59,8 +59,17 @@ class OTB100UWBDataset(BaseDataset):
         # 读取标注文件
         ground_truth_rect = load_text(str(anno_path), delimiter=(',', None), dtype=np.float64, backend='numpy')
 
-        return Sequence(sequence_info['name'], frames, 'otb100_uwb', ground_truth_rect[init_omit:,:],
-                        object_class=sequence_info.get('object_class', 'unknown'))
+        init_data = {
+            0: {
+                "bbox": ground_truth_rect[init_omit, :],
+                "uwb_noise_path": '{}/{}/{}/uwb_noise.txt'.format(self.base_path, self.split, sequence_path),
+                "uwb_gt_path": '{}/{}/{}/uwb_gt.txt'.format(self.base_path, self.split, sequence_path),
+                "alpha_gt_path": '{}/{}/{}/alpha_gt.txt'.format(self.base_path, self.split, sequence_path),
+            }
+        }
+
+        return Sequence(sequence_info['name'], frames, 'otb100_uwb', ground_truth_rect[init_omit:, :],
+                        init_data=init_data, object_class=sequence_info.get('object_class', 'unknown'))
 
     def __len__(self):
         return len(self.sequence_info_list)

@@ -138,7 +138,6 @@ class OTB100UWB(BaseVideoDataset):
     def _build_uwb_seq(self, seq_path, uwb):
         uv = uwb[:, :2]
         uwb_seq = []
-        print(f"Building UWB sequence with length {self.uwb_seq_len} for {uv.shape[0]} frames.")
         for frame_id in range(uv.shape[0]):
             seq_list = []
             for i in range(self.uwb_seq_len):

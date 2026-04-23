@@ -139,7 +139,7 @@ class UGTrack(BaseTracker):
         return np.loadtxt(uwb_noise_path, delimiter=",", dtype=np.float32)
 
     def _build_search_uwb_seq(self, frame_id, height, width):
-        seq_len = int(self.cfg.MODEL.UWB.SEQ_LEN)
+        seq_len = int(self.cfg.DATA.UWB.SEQ_LEN)
         if self.uwb_noise is None:
             seq = np.zeros((seq_len, 2), dtype=np.float32)
         else:

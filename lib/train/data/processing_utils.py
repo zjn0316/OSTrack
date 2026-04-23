@@ -139,7 +139,6 @@ def jittered_center_crop(frames, box_extract, box_gt, search_area_factor, output
     '''Note that here we use normalized coord'''
     box_crop = [transform_image_to_crop(a_gt, a_ex, rf, crop_sz, normalize=True)
                 for a_gt, a_ex, rf in zip(box_gt, box_extract, resize_factors)]  # (x1,y1,w,h) list of tensors
-
     return frames_crop, box_crop, att_mask, masks_crop
 
 

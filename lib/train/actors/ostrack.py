@@ -3,8 +3,8 @@ from lib.utils.misc import NestedTensor
 from lib.utils.box_ops import box_cxcywh_to_xyxy, box_xywh_to_xyxy
 import torch
 from lib.utils.merge import merge_template_search
-from ...utils.heapmap_utils import generate_heatmap
-from ...utils.ce_utils import generate_mask_cond, adjust_keep_rate
+from lib.utils.heapmap_utils import generate_heatmap
+from lib.utils.ce_utils import generate_mask_cond, adjust_keep_rate
 
 
 class OSTrackActor(BaseActor):
@@ -14,7 +14,6 @@ class OSTrackActor(BaseActor):
         super().__init__(net, objective)
         self.loss_weight = loss_weight
         self.settings = settings
-        self.bs = self.settings.batchsize  # 批大小
         self.cfg = cfg
 
     def __call__(self, data):

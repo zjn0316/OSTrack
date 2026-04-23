@@ -37,7 +37,7 @@ DATA:
     SCALE_JITTER: 0
 
 MODEL:
-  PRETRAIN_FILE: mae_pretrain_vit_base.pth
+  PRETRAIN_FILE: output/checkpoints/train/ostrack/vitb_256_mae_32x4_ep300/OSTrack_ep0300.pth.tar
   EXTRA_MERGER: False
   RETURN_INTER: False
   RETURN_STAGES: []
@@ -78,7 +78,7 @@ MODEL:
 
 TRAIN:
   STAGE: 2
-  LR: 0.0004
+  LR: 0.0001
   WEIGHT_DECAY: 0.0001
   EPOCH: 300
   LR_DROP_EPOCH: 240

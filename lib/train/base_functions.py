@@ -9,6 +9,10 @@ from lib.utils.misc import is_main_process
 
 
 def update_settings(settings, cfg):
+    # ==================================
+    # 基础训练参数同步
+    # ==================================
+    # 将配置中的训练公共字段写入 settings，供数据处理与训练器统一使用。
     settings.print_interval = cfg.TRAIN.PRINT_INTERVAL
     settings.search_area_factor = {'template': cfg.DATA.TEMPLATE.FACTOR,
                                    'search': cfg.DATA.SEARCH.FACTOR}
@@ -25,9 +29,14 @@ def update_settings(settings, cfg):
 
 
 def names2datasets(name_list: list, settings, image_loader):
+    # ==================================
+    # 数据集名称到实例的映射
+    # ==================================
+    # 根据配置中的数据集名称列表，构造对应的数据集对象。
     assert isinstance(name_list, list)
     datasets = []
     for name in name_list:
+        # 限定支持的数据集名称范围，避免拼写或配置错误。
         assert name in ["LASOT", "GOT10K_vottrain", "GOT10K_votval", "GOT10K_train_full", "GOT10K_official_val",
                         "COCO17", "VID", "TRACKINGNET", "OTB100_UWB"]
         if name == "LASOT":
@@ -84,7 +93,10 @@ def names2datasets(name_list: list, settings, image_loader):
 
 
 def build_dataloaders(cfg, settings):
-    # transform配置
+    # ==================================
+    # 数据增强与变换配置
+    # ==================================
+    # 定义 joint/train/val 三类变换流程。
     transform_joint = tfm.Transform(tfm.ToGrayscale(probability=0.05),
                                     tfm.RandomHorizontalFlip(probability=0.5))
 
@@ -95,11 +107,13 @@ def build_dataloaders(cfg, settings):
     transform_val = tfm.Transform(tfm.ToTensor(),
                                   tfm.Normalize(mean=cfg.DATA.MEAN, std=cfg.DATA.STD))
 
-    # The tracking pairs processing module
+    # ==================================
+    # 预处理模块构建
+    # ==================================
+    # 基于模板与搜索区域配置构建训练/验证预处理流程。
     output_sz = settings.output_sz
     search_area_factor = settings.search_area_factor
 
-    # 预处理配置
     data_processing_train = processing.STARKProcessing(search_area_factor=search_area_factor,
                                                        output_sz=output_sz,
                                                        center_jitter_factor=settings.center_jitter_factor,
@@ -118,14 +132,16 @@ def build_dataloaders(cfg, settings):
                                                      joint_transform=transform_joint,
                                                      settings=settings)
 
-    # Train sampler and loader
+    # ==================================
+    # 训练集采样器与加载器
+    # ==================================
+    # 从配置读取模板帧数量、搜索帧数量与采样模式，构建训练数据管线。
     settings.num_template = getattr(cfg.DATA.TEMPLATE, "NUMBER", 1)
     settings.num_search = getattr(cfg.DATA.SEARCH, "NUMBER", 1)
     sampler_mode = getattr(cfg.DATA, "SAMPLER_MODE", "causal")
     train_cls = getattr(cfg.TRAIN, "TRAIN_CLS", False)
     print("sampler_mode", sampler_mode)
 
-    # 采样
     dataset_train = sampler.TrackingSampler(datasets=names2datasets(cfg.DATA.TRAIN.DATASETS_NAME, settings, opencv_loader),
                                             p_datasets=cfg.DATA.TRAIN.DATASETS_RATIO,
                                             samples_per_epoch=cfg.DATA.TRAIN.SAMPLE_PER_EPOCH,
@@ -139,7 +155,10 @@ def build_dataloaders(cfg, settings):
     loader_train = LTRLoader('train', dataset_train, training=True, batch_size=cfg.TRAIN.BATCH_SIZE, shuffle=shuffle,
                              num_workers=cfg.TRAIN.NUM_WORKER, drop_last=True, stack_dim=1, sampler=train_sampler)
 
-    # Validation samplers and loaders
+    # ==================================
+    # 验证集采样器与加载器
+    # ==================================
+    # 验证集与训练集保持相同的采样逻辑与处理流程。
     dataset_val = sampler.TrackingSampler(datasets=names2datasets(cfg.DATA.VAL.DATASETS_NAME, settings, opencv_loader),
                                           p_datasets=cfg.DATA.VAL.DATASETS_RATIO,
                                           samples_per_epoch=cfg.DATA.VAL.SAMPLE_PER_EPOCH,
@@ -155,6 +174,9 @@ def build_dataloaders(cfg, settings):
 
 
 def get_optimizer_scheduler(net, cfg):
+    # ==================================
+    # 参数设置
+    # ==================================
     # 读取配置中是否只训练分类头；如果没有 TRAIN_CLS 字段，则默认进行正常训练。
     train_cls = getattr(cfg.TRAIN, "TRAIN_CLS", False)
     if train_cls:
@@ -172,10 +194,10 @@ def get_optimizer_scheduler(net, cfg):
                 print(n)
     else:
         # 正常训练模式：将参数分成非 backbone 和 backbone 两组。
-        # 非 backbone 参数使用默认学习率 cfg.TRAIN.LR。
-        # backbone 通常来自预训练模型，因此使用更小的学习率进行微调。
         param_dicts = [
+            # 非 backbone 参数使用默认学习率 cfg.TRAIN.LR。
             {"params": [p for n, p in net.named_parameters() if "backbone" not in n and p.requires_grad]},
+            # backbone 通常来自预训练模型，因此使用更小的学习率进行微调。
             {
                 "params": [p for n, p in net.named_parameters() if "backbone" in n and p.requires_grad],
                 "lr": cfg.TRAIN.LR * cfg.TRAIN.BACKBONE_MULTIPLIER,
@@ -187,14 +209,18 @@ def get_optimizer_scheduler(net, cfg):
             #     if p.requires_grad:
             #         print(n)
 
-    # 根据上面整理好的参数组创建优化器。
-    # AdamW 将 weight decay 从 Adam 更新中解耦，常用于训练 Transformer 类模型。
+    # ====================================
+    # 创建优化器。
+    # ====================================
     if cfg.TRAIN.OPTIMIZER == "ADAMW":
         optimizer = torch.optim.AdamW(param_dicts, lr=cfg.TRAIN.LR,
                                       weight_decay=cfg.TRAIN.WEIGHT_DECAY)
     else:
         raise ValueError("Unsupported Optimizer")
 
+    # ====================================
+    # 创建学习率调度器。
+    # ====================================
     # 创建学习率调度器：StepLR 每隔 LR_DROP_EPOCH 个 epoch 降低一次学习率。
     if cfg.TRAIN.SCHEDULER.TYPE == 'step':
         lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, cfg.TRAIN.LR_DROP_EPOCH)

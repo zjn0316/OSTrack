@@ -160,25 +160,16 @@ cython_debug/
 
 # lib/train/admin/local.py
 # lib/test/evaluation/local.py
-ltr/run_ltr_local.py
-ltr/train_settings/*/debug.py
-pytracking/parameter/*/debug.py
-pytracking/networks/
-pytracking/tracking_results/
-pytracking/result_plots/
-pytracking/evaluation/local.py
-pytracking/run_local.py
-data/
+
+/data/
 .vscode/
 output/
 pretrained_models/
 script/
 tensorboard/
-output_smoke*/
-**/checkpoints/
+doc/UG-OSTrack.md
+doc/ugtrack.md
 *.pth
 *.pth.tar
 *.pt
 *.ckpt
-doc/UG-OSTrack.md
-doc/ugtrack.md

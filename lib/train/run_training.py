@@ -115,6 +115,7 @@ def run_training(script_name, config_name, cudnn_benchmark=True, local_rank=-1, 
         expr_module = importlib.import_module('lib.train.train_script_distill')
     else:
         # 动态导入常规训练模块。运行前需要先在终端执行: conda activate ostrack
+        # ostrack 或者 ugtrack
         expr_module_name = TRAIN_SCRIPT_REGISTRY.get(script_name)
         if expr_module_name is None:
             raise ValueError("Unsupported script name: {}".format(script_name))

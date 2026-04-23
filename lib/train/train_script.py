@@ -9,14 +9,14 @@ from torch.nn.functional import l1_loss
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 # 项目本地模块导入
+# 模型构建
+from lib.models.ostrack import build_ostrack
+# 训练框架相关
+from lib.train.actors import OSTrackActor
+from lib.train.trainers import LTRTrainer
 # 损失函数
 from lib.utils.box_ops import giou_loss
 from lib.utils.focal_loss import FocalLoss
-# 训练框架相关
-from lib.train.trainers import LTRTrainer
-from lib.train.actors import OSTrackActor
-# 模型构建
-from lib.models.ostrack import build_ostrack
 # 基础公共函数
 from .base_functions import *
 
@@ -37,6 +37,7 @@ def run(settings):
     cfg = config_module.cfg
     # 使用指定的 yaml 文件内容更新默认配置
     config_module.update_config_from_file(settings.cfg_file)
+
     if settings.local_rank in [-1, 0]:
         print("New configuration is shown below.")
         # for key in cfg.keys():
@@ -103,10 +104,14 @@ def run(settings):
         raise ValueError("illegal script name")
 
     # ====================
-    # 优化器与训练器设置
+    # 优化器与学习率调度器设置
     # ====================
     # 初始化优化器（Optimizer）和学习率调度器（LR Scheduler）
     optimizer, lr_scheduler = get_optimizer_scheduler(net, cfg)
+
+    # ====================
+    # 训练器设置
+    # ====================
     # 检查是否启用自动混合精度训练 (Automatic Mixed Precision)
     use_amp = getattr(cfg.TRAIN, "AMP", False)
     # 实例化训练引擎 LTRTrainer

@@ -179,7 +179,7 @@ def run_dataset(dataset, trackers, debug=False, threads=0, num_gpus=8):
     if mode == 'sequential':
         for seq in dataset:
             for tracker_info in trackers:
-                run_sequence(seq, tracker_info, debug=debug)
+                run_sequence(seq, tracker_info, debug=debug, num_gpu=num_gpus)
     elif mode == 'parallel':
         param_list = [(seq, tracker_info, debug, num_gpus) for seq, tracker_info in product(dataset, trackers)]
         with multiprocessing.Pool(processes=threads) as pool:

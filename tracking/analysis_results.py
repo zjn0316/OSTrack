@@ -14,6 +14,12 @@ trackers.extend(trackerlist(name='ostrack', parameter_name='vitb_256_mae_32x4_ep
 trackers.extend(trackerlist(name='ostrack', parameter_name='vitb_256_mae_ce_32x4_ep300', dataset_name=dataset_name,
                             run_ids=None, display_name='OSTrack256_CE'))
 
+"""ugtrack"""
+trackers.extend(trackerlist(name='ugtrack',
+                            parameter_name='vitb_256_mae_ep300_uwb_conv1d_token',
+                            dataset_name=dataset_name,
+                            run_ids=None,
+                            display_name='UGTrack_Conv1D_Token'))
 
 
 dataset = get_dataset(dataset_name)

@@ -128,7 +128,7 @@ class LTRTrainer(BaseTrainer):
                     self.scaler.update()
 
             # 更新统计信息
-            batch_size = data['template_images'].shape[loader.stack_dim]
+            batch_size = self._get_batch_size(data, loader.stack_dim)
             self._update_stats(stats, batch_size, loader)
 
             # 打印统计日志
@@ -145,6 +145,21 @@ class LTRTrainer(BaseTrainer):
         print("Avg Data Time: %.5f" % (self.avg_date_time / self.num_frames * batch_size))
         print("Avg GPU Trans Time: %.5f" % (self.avg_gpu_trans_time / self.num_frames * batch_size))
         print("Avg Forward Time: %.5f" % (self.avg_forward_time / self.num_frames * batch_size))
+
+    @staticmethod
+    def _get_batch_size(data, stack_dim):
+        candidate_keys = [
+            'template_images',
+            'search_images',
+            'search_uwb_seq',
+            'search_uwb_gt',
+            'search_alpha_gt',
+        ]
+        for key in candidate_keys:
+            value = data.get(key)
+            if hasattr(value, 'shape'):
+                return value.shape[stack_dim]
+        raise KeyError("Unable to infer batch size from data keys: {}".format(list(data.keys())))
 
     def train_epoch(self):
         """为每个数据加载器（Loader）执行一个 Epoch 的训练/验证。"""

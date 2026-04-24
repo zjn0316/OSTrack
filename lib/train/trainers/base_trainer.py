@@ -53,8 +53,9 @@ class BaseTrainer:
 
             if self.settings.local_rank in [-1, 0]:
                 if not os.path.exists(self._checkpoint_dir):
-                    print("Training with multiple GPUs. checkpoints directory doesn't exist. "
-                          "Create checkpoints directory")
+                    train_mode = "single GPU" if self.settings.local_rank == -1 else "distributed"
+                    print("{} training. checkpoints directory doesn't exist. "
+                          "Create checkpoints directory".format(train_mode))
                     os.makedirs(self._checkpoint_dir)
         else:
             self._checkpoint_dir = None
@@ -76,13 +77,16 @@ class BaseTrainer:
                 # ====================
                 # 加载权重与状态
                 # ====================
+                resumed_from_latest = False
                 if load_latest:
                     # 从当前项目的最新 checkpoint 恢复
-                    self.load_checkpoint()
-                if load_previous_ckpt:
+                    resumed_from_latest = self.load_checkpoint() is True
+                if load_previous_ckpt and not resumed_from_latest:
                     # 从项目定义的先前路径加载权重
                     directory = '{}/{}'.format(self._checkpoint_dir, self.settings.project_path_prv)
                     self.load_state_dict(directory)
+                elif load_previous_ckpt and resumed_from_latest:
+                    print("Skip previous checkpoint loading because current experiment checkpoint was resumed.")
                 if distill:
                     # 加载教师模型权重（用于知识蒸馏）
                     directory_teacher = '{}/{}'.format(self._checkpoint_dir, self.settings.project_path_teacher)

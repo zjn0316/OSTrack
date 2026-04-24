@@ -3,12 +3,13 @@ from collections import OrderedDict
 try:
     import wandb
 except ImportError:
-    raise ImportError(
-        'Please run "pip install wandb" to install wandb')
+    wandb = None
 
 
 class WandbWriter:
     def __init__(self, exp_name, cfg, output_dir, cur_step=0, step_interval=0):
+        if wandb is None:
+            raise ImportError('Please run "pip install wandb" to install wandb')
         self.wandb = wandb
         self.step = cur_step
         self.interval = step_interval

@@ -13,14 +13,14 @@ davis_palette[:22, :] = [[0, 0, 0], [128, 0, 0], [0, 128, 0], [128, 128, 0],
 
 
 def default_image_loader(path):
-    """The default image loader, reads the image from the given path. It first tries to use the jpeg4py_loader,
-    but reverts to the opencv_loader if the former is not available."""
+    """默认图像加载器，从给定路径读取图像。优先尝试 jpeg4py_loader，
+    若不可用则回退到 opencv_loader。"""
     if default_image_loader.use_jpeg4py is None:
-        # Try using jpeg4py
+        # 尝试使用 jpeg4py
         im = jpeg4py_loader(path)
         if im is None:
             default_image_loader.use_jpeg4py = False
-            print('Using opencv_loader instead.')
+            print('改用 opencv_loader。')
         else:
             default_image_loader.use_jpeg4py = True
             return im
@@ -32,7 +32,7 @@ default_image_loader.use_jpeg4py = None
 
 
 def jpeg4py_loader(path):
-    """ Image reading using jpeg4py https://github.com/ajkxyz/jpeg4py"""
+    """使用 jpeg4py 读取图像 https://github.com/ajkxyz/jpeg4py"""
     try:
         return jpeg4py.JPEG(path).decode()
     except Exception as e:
@@ -42,11 +42,11 @@ def jpeg4py_loader(path):
 
 
 def opencv_loader(path):
-    """ Read image using opencv's imread function and returns it in rgb format"""
+    """使用 opencv 的 imread 读取图像，并以 RGB 格式返回"""
     try:
         im = cv.imread(path, cv.IMREAD_COLOR)
 
-        # convert to rgb and return
+        # 转换为 RGB 并返回
         return cv.cvtColor(im, cv.COLOR_BGR2RGB)
     except Exception as e:
         print('ERROR: Could not read image "{}"'.format(path))
@@ -55,14 +55,14 @@ def opencv_loader(path):
 
 
 def jpeg4py_loader_w_failsafe(path):
-    """ Image reading using jpeg4py https://github.com/ajkxyz/jpeg4py"""
+    """使用 jpeg4py 读取图像（带故障回退）https://github.com/ajkxyz/jpeg4py"""
     try:
         return jpeg4py.JPEG(path).decode()
     except:
         try:
             im = cv.imread(path, cv.IMREAD_COLOR)
 
-            # convert to rgb and return
+            # 转换为 RGB 并返回
             return cv.cvtColor(im, cv.COLOR_BGR2RGB)
         except Exception as e:
             print('ERROR: Could not read image "{}"'.format(path))
@@ -71,7 +71,7 @@ def jpeg4py_loader_w_failsafe(path):
 
 
 def opencv_seg_loader(path):
-    """ Read segmentation annotation using opencv's imread function"""
+    """使用 opencv 的 imread 读取分割标注"""
     try:
         return cv.imread(path)
     except Exception as e:
@@ -81,7 +81,7 @@ def opencv_seg_loader(path):
 
 
 def imread_indexed(filename):
-    """ Load indexed image with given filename. Used to read segmentation annotations."""
+    """根据给定文件名加载索引图像，用于读取分割标注。"""
 
     im = Image.open(filename)
 
@@ -90,7 +90,7 @@ def imread_indexed(filename):
 
 
 def imwrite_indexed(filename, array, color_palette=None):
-    """ Save indexed image as png. Used to save segmentation annotation."""
+    """将索引图像保存为 PNG，用于保存分割标注。"""
 
     if color_palette is None:
         color_palette = davis_palette

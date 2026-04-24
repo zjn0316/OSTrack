@@ -81,15 +81,18 @@ class UGTrack(nn.Module):
 
 def build_ugtrack(cfg, training=True):
     # =====================
-    # 设置 pretrained 路径
+    # 设置视觉分支初始化路径
     # =====================
     current_dir = os.path.dirname(os.path.abspath(__file__))
     pretrained_path = os.path.join(current_dir, "../../../pretrained_models")
-
-    if cfg.MODEL.PRETRAIN_FILE and ("OSTrack" not in cfg.MODEL.PRETRAIN_FILE) and training:
-        pretrained = os.path.join(pretrained_path, cfg.MODEL.PRETRAIN_FILE)
-    else:
-        pretrained = ""
+    pretrain_file = str(getattr(cfg.MODEL, "PRETRAIN_FILE", "") or "")
+    pretrain_is_ostrack_checkpoint = (
+        "checkpoints/train/ostrack" in pretrain_file.replace("\\", "/").lower()
+        or os.path.basename(pretrain_file).startswith("OSTrack_")
+    )
+    mae_pretrained = ""
+    if pretrain_file and training and not pretrain_is_ostrack_checkpoint:
+        mae_pretrained = os.path.join(pretrained_path, pretrain_file)
 
     # =====================
     # 构建 UWB branch
@@ -102,19 +105,19 @@ def build_ugtrack(cfg, training=True):
     tracker = None
     if int(getattr(cfg.TRAIN, "STAGE", 1)) == 2:
         if cfg.MODEL.BACKBONE.TYPE == "vit_base_patch16_224":
-            backbone = vit_base_patch16_224(pretrained, drop_path_rate=cfg.TRAIN.DROP_PATH_RATE)
+            backbone = vit_base_patch16_224(mae_pretrained, drop_path_rate=cfg.TRAIN.DROP_PATH_RATE)
             hidden_dim = backbone.embed_dim
             patch_start_index = 1
 
         elif cfg.MODEL.BACKBONE.TYPE == "vit_base_patch16_224_ce":
-            backbone = vit_base_patch16_224_ce(pretrained, drop_path_rate=cfg.TRAIN.DROP_PATH_RATE,
+            backbone = vit_base_patch16_224_ce(mae_pretrained, drop_path_rate=cfg.TRAIN.DROP_PATH_RATE,
                                                ce_loc=cfg.MODEL.BACKBONE.CE_LOC,
                                                ce_keep_ratio=cfg.MODEL.BACKBONE.CE_KEEP_RATIO)
             hidden_dim = backbone.embed_dim
             patch_start_index = 1
 
         elif cfg.MODEL.BACKBONE.TYPE == "vit_large_patch16_224_ce":
-            backbone = vit_large_patch16_224_ce(pretrained, drop_path_rate=cfg.TRAIN.DROP_PATH_RATE,
+            backbone = vit_large_patch16_224_ce(mae_pretrained, drop_path_rate=cfg.TRAIN.DROP_PATH_RATE,
                                                 ce_loc=cfg.MODEL.BACKBONE.CE_LOC,
                                                 ce_keep_ratio=cfg.MODEL.BACKBONE.CE_KEEP_RATIO)
             hidden_dim = backbone.embed_dim
@@ -128,14 +131,12 @@ def build_ugtrack(cfg, training=True):
         tracker = OSTrack(backbone, box_head, aux_loss=False, head_type=cfg.MODEL.HEAD.TYPE)
 
         # =====================
-        # 加载 OSTrack 官方预训练权重
+        # 加载已训练 OSTrack tracker 权重
         # =====================
-        if "OSTrack" in cfg.MODEL.PRETRAIN_FILE and training:
-            checkpoint = torch.load(cfg.MODEL.PRETRAIN_FILE, map_location="cpu")
-            # 3. 加载权重到 tracker，允许部分 key 不匹配（strict=False）
+        if pretrain_file and pretrain_is_ostrack_checkpoint and training:
+            checkpoint = torch.load(pretrain_file, map_location="cpu")
             missing_keys, unexpected_keys = tracker.load_state_dict(checkpoint["net"], strict=False)
-            # 4. 打印加载信息，便于调试
-            print("Load pretrained OSTrack tracker from: {}".format(cfg.MODEL.PRETRAIN_FILE))
+            print("Load pretrained OSTrack tracker from: {}".format(pretrain_file))
 
 
     # =====================

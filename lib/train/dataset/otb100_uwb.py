@@ -34,6 +34,7 @@ class OTB100UWB(BaseVideoDataset):
         if data_fraction is not None:
             self.sequence_list = random.sample(self.sequence_list, int(len(self.sequence_list) * data_fraction))
 
+        self._sequence_info_cache = {}
         self.sequence_meta_info = self._load_meta_info()
         self.seq_per_class = self._build_seq_per_class()
         self.class_list = list(self.seq_per_class.keys())
@@ -155,7 +156,7 @@ class OTB100UWB(BaseVideoDataset):
         alpha = pandas.read_csv(alpha_file, header=None, dtype=np.float32, na_filter=False, low_memory=False).values.reshape(-1)
         return torch.tensor(alpha, dtype=torch.float32)
     
-    def get_sequence_info(self, seq_id):
+    def _build_sequence_info(self, seq_id):
         seq_path = self._get_sequence_path(seq_id)
         bbox = self._read_bb_anno(seq_path)
 
@@ -179,6 +180,13 @@ class OTB100UWB(BaseVideoDataset):
             'uwb_seq': uwb_seq,
             'alpha_gt': alpha_gt,
         }
+
+    def get_sequence_info(self, seq_id):
+        seq_info = self._sequence_info_cache.get(seq_id)
+        if seq_info is None:
+            seq_info = self._build_sequence_info(seq_id)
+            self._sequence_info_cache[seq_id] = seq_info
+        return seq_info
 
     def get_frames(self, seq_id, frame_ids, anno=None):
         seq_path = self._get_sequence_path(seq_id)

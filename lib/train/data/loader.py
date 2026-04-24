@@ -1,7 +1,9 @@
+import collections
+import importlib
+import os
+
 import torch
 import torch.utils.data.dataloader
-import importlib
-import collections
 # 兼容 PyTorch 2.0+
 try:
     from torch._six import string_classes
@@ -16,6 +18,58 @@ else:
         from torch._six import int_classes
     except ImportError:
         int_classes = int
+
+
+_WORKER_COMPAT_CACHE = {}
+
+
+class _WorkerProbeDataset(torch.utils.data.Dataset):
+    def __len__(self):
+        return 1
+
+    def __getitem__(self, index):
+        return torch.zeros(1)
+
+
+def resolve_num_workers(requested_num_workers):
+    """Return a usable num_workers value on the current machine."""
+    if requested_num_workers <= 0:
+        return 0
+
+    if os.name != 'nt':
+        return requested_num_workers
+
+    if os.environ.get('OSTRACK_ENABLE_WINDOWS_WORKERS', '0') != '1':
+        print(
+            "Windows DataLoader multiprocessing is disabled on this machine. "
+            f"Requested num_workers={requested_num_workers} will use num_workers=0. "
+            "Set OSTRACK_ENABLE_WINDOWS_WORKERS=1 to bypass this safeguard."
+        )
+        return 0
+
+    cache_key = int(requested_num_workers)
+    if cache_key in _WORKER_COMPAT_CACHE:
+        return _WORKER_COMPAT_CACHE[cache_key]
+
+    try:
+        probe_loader = torch.utils.data.DataLoader(
+            _WorkerProbeDataset(),
+            batch_size=1,
+            num_workers=requested_num_workers,
+        )
+        probe_iter = iter(probe_loader)
+        next(probe_iter)
+        resolved_num_workers = requested_num_workers
+    except (PermissionError, OSError, RuntimeError) as exc:
+        print(
+            "DataLoader workers unavailable on this Windows machine "
+            f"(requested num_workers={requested_num_workers}, error={type(exc).__name__}: {exc}). "
+            "Falling back to num_workers=0."
+        )
+        resolved_num_workers = 0
+
+    _WORKER_COMPAT_CACHE[cache_key] = resolved_num_workers
+    return resolved_num_workers
 
 
 def _check_use_shared_memory():

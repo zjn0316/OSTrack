@@ -16,12 +16,14 @@ class UWBHead(nn.Module):
 
         if final_act is None:
             self.final_act = nn.Identity()
+        elif final_act == "relu":
+            self.final_act = nn.ReLU(inplace=False)
         elif final_act == "sigmoid":
             self.final_act = nn.Sigmoid()
         elif final_act == "tanh":
             self.final_act = nn.Tanh()
         else:
-            raise ValueError("final_act must be one of [None, 'sigmoid', 'tanh']")
+            raise ValueError("final_act must be one of [None, 'relu', 'sigmoid', 'tanh']")
 
         self._init_weights()
 
@@ -44,4 +46,3 @@ class UWBHead(nn.Module):
                 raise ValueError("If x is 3D, expected shape [B, 1, 768]")
             x = x[:, 0, :]
         return self.final_act(self.mlp(x))
-

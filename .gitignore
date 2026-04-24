@@ -163,10 +163,10 @@ cython_debug/
 
 /data/
 .vscode/
-output/
+/output*/
 pretrained_models/
 script/
-tensorboard/
+/tensorboard/
 doc/UG-OSTrack.md
 doc/ugtrack.md
 *.pth

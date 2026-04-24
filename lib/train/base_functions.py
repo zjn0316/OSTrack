@@ -4,6 +4,7 @@ from torch.utils.data.distributed import DistributedSampler
 from lib.train.dataset import Lasot, Got10k, MSCOCOSeq, ImagenetVID, TrackingNet, OTB100UWB
 from lib.train.dataset import Lasot_lmdb, Got10k_lmdb, MSCOCOSeq_lmdb, ImagenetVID_lmdb, TrackingNet_lmdb
 from lib.train.data import sampler, opencv_loader, processing, LTRLoader
+from lib.train.data.loader import resolve_num_workers
 import lib.train.data.transforms as tfm
 from lib.utils.misc import is_main_process
 
@@ -140,6 +141,7 @@ def build_dataloaders(cfg, settings):
     settings.num_search = getattr(cfg.DATA.SEARCH, "NUMBER", 1)
     sampler_mode = getattr(cfg.DATA, "SAMPLER_MODE", "causal")
     train_cls = getattr(cfg.TRAIN, "TRAIN_CLS", False)
+    num_workers = resolve_num_workers(cfg.TRAIN.NUM_WORKER)
     print("sampler_mode", sampler_mode)
 
     dataset_train = sampler.TrackingSampler(datasets=names2datasets(cfg.DATA.TRAIN.DATASETS_NAME, settings, opencv_loader),
@@ -153,7 +155,7 @@ def build_dataloaders(cfg, settings):
     shuffle = False if settings.local_rank != -1 else True
 
     loader_train = LTRLoader('train', dataset_train, training=True, batch_size=cfg.TRAIN.BATCH_SIZE, shuffle=shuffle,
-                             num_workers=cfg.TRAIN.NUM_WORKER, drop_last=True, stack_dim=1, sampler=train_sampler)
+                             num_workers=num_workers, drop_last=True, stack_dim=1, sampler=train_sampler)
 
     # ==================================
     # 验证集采样器与加载器
@@ -167,7 +169,7 @@ def build_dataloaders(cfg, settings):
                                           frame_sample_mode=sampler_mode, train_cls=train_cls)
     val_sampler = DistributedSampler(dataset_val) if settings.local_rank != -1 else None
     loader_val = LTRLoader('val', dataset_val, training=False, batch_size=cfg.TRAIN.BATCH_SIZE,
-                           num_workers=cfg.TRAIN.NUM_WORKER, drop_last=True, stack_dim=1, sampler=val_sampler,
+                           num_workers=num_workers, drop_last=True, stack_dim=1, sampler=val_sampler,
                            epoch_interval=cfg.TRAIN.VAL_EPOCH_INTERVAL)
 
     return loader_train, loader_val

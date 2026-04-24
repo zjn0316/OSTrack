@@ -116,6 +116,16 @@ def run(settings):
     # ====================
     # 阶段2支持加载第一阶段训练产物
     load_previous_ckpt = stage == 2 and hasattr(settings, "project_path_prv")
+    if settings.local_rank in [-1, 0]:
+        print("UGTrack weight loading plan:")
+        print("  stage: {}".format(stage))
+        print("  load_latest/current experiment resume: True")
+        print("  load_previous/stage-1 init: {}".format(load_previous_ckpt))
+        if load_previous_ckpt:
+            print("  previous checkpoint project: {}".format(settings.project_path_prv))
+        elif stage == 2:
+            print("  previous checkpoint project: None")
+        print("  model pretrain file: {}".format(cfg.MODEL.PRETRAIN_FILE))
 
     # ====================
     # 启动训练循环

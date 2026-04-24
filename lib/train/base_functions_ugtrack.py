@@ -3,6 +3,8 @@ from torch.utils.data.distributed import DistributedSampler
 
 from lib.train.dataset import OTB100UWB
 from lib.train.data import uwb_processing, uwb_sampler, LTRLoader, opencv_loader
+from lib.train.data.loader import resolve_num_workers
+from lib.train.data.uwb_stage1_dataset import UWBStage1Dataset
 from lib.train.data import transforms as tfm
 from lib.utils.misc import is_main_process
 
@@ -51,6 +53,50 @@ def names2datasets(name_list: list, settings, image_loader, split='train'):
 
 
 def build_dataloaders(cfg, settings):
+    stage = int(getattr(cfg.TRAIN, 'STAGE', 1))
+    num_workers = resolve_num_workers(cfg.TRAIN.NUM_WORKER)
+    if stage == 1:
+        dataset_train = UWBStage1Dataset(
+            datasets=names2datasets(cfg.DATA.TRAIN.DATASETS_NAME, settings, opencv_loader, split='train'),
+            p_datasets=cfg.DATA.TRAIN.DATASETS_RATIO,
+            samples_per_epoch=cfg.DATA.TRAIN.SAMPLE_PER_EPOCH,
+            coord_scale=cfg.DATA.SEARCH.SIZE,
+        )
+        dataset_val = UWBStage1Dataset(
+            datasets=names2datasets(cfg.DATA.VAL.DATASETS_NAME, settings, opencv_loader, split='val'),
+            p_datasets=cfg.DATA.VAL.DATASETS_RATIO,
+            samples_per_epoch=cfg.DATA.VAL.SAMPLE_PER_EPOCH,
+            coord_scale=cfg.DATA.SEARCH.SIZE,
+        )
+
+        train_sampler = DistributedSampler(dataset_train) if settings.local_rank != -1 else None
+        shuffle = False if settings.local_rank != -1 else True
+        loader_train = LTRLoader(
+            'train',
+            dataset_train,
+            training=True,
+            batch_size=cfg.TRAIN.BATCH_SIZE,
+            shuffle=shuffle,
+            num_workers=num_workers,
+            drop_last=True,
+            stack_dim=1,
+            sampler=train_sampler,
+        )
+
+        val_sampler = DistributedSampler(dataset_val) if settings.local_rank != -1 else None
+        loader_val = LTRLoader(
+            'val',
+            dataset_val,
+            training=False,
+            batch_size=cfg.TRAIN.BATCH_SIZE,
+            num_workers=num_workers,
+            drop_last=True,
+            stack_dim=1,
+            sampler=val_sampler,
+            epoch_interval=cfg.TRAIN.VAL_EPOCH_INTERVAL,
+        )
+        return loader_train, loader_val
+
     # ==================================
     # 数据增强与变换配置
     # ==================================
@@ -116,7 +162,7 @@ def build_dataloaders(cfg, settings):
     shuffle = False if settings.local_rank != -1 else True
 
     loader_train = LTRLoader('train', dataset_train, training=True, batch_size=cfg.TRAIN.BATCH_SIZE, shuffle=shuffle,
-                             num_workers=cfg.TRAIN.NUM_WORKER, drop_last=True, stack_dim=1, sampler=train_sampler)
+                             num_workers=num_workers, drop_last=True, stack_dim=1, sampler=train_sampler)
 
     # ==================================
     # 验证集采样器与加载器
@@ -136,7 +182,7 @@ def build_dataloaders(cfg, settings):
 
     val_sampler = DistributedSampler(dataset_val) if settings.local_rank != -1 else None
     loader_val = LTRLoader('val', dataset_val, training=False, batch_size=cfg.TRAIN.BATCH_SIZE,
-                           num_workers=cfg.TRAIN.NUM_WORKER, drop_last=True, stack_dim=1, sampler=val_sampler,
+                           num_workers=num_workers, drop_last=True, stack_dim=1, sampler=val_sampler,
                            epoch_interval=cfg.TRAIN.VAL_EPOCH_INTERVAL)
 
     return loader_train, loader_val

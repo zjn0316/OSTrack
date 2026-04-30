@@ -6,7 +6,10 @@ from torch import nn
 from lib.models.layers.head import build_box_head
 from lib.models.ostrack.ostrack import OSTrack
 from lib.models.ostrack.vit import vit_base_patch16_224
-from lib.models.ostrack.vit_ce import vit_base_patch16_224_ce, vit_large_patch16_224_ce
+from lib.models.ugtrack.vit_ce_uwb import (
+    vit_base_patch16_224_ce_uwb,
+    vit_large_patch16_224_ce_uwb,
+)
 from lib.models.ugtrack.uwb_branch import build_uwb_branch
 
 
@@ -100,16 +103,16 @@ def build_ugtrack(cfg, training=True):
             patch_start_index = 1
 
         elif cfg.MODEL.BACKBONE.TYPE == "vit_base_patch16_224_ce":
-            backbone = vit_base_patch16_224_ce(mae_pretrained, drop_path_rate=cfg.TRAIN.DROP_PATH_RATE,
-                                               ce_loc=cfg.MODEL.BACKBONE.CE_LOC,
-                                               ce_keep_ratio=cfg.MODEL.BACKBONE.CE_KEEP_RATIO)
+            backbone = vit_base_patch16_224_ce_uwb(mae_pretrained, drop_path_rate=cfg.TRAIN.DROP_PATH_RATE,
+                                                   ce_loc=cfg.MODEL.BACKBONE.CE_LOC,
+                                                   ce_keep_ratio=cfg.MODEL.BACKBONE.CE_KEEP_RATIO)
             hidden_dim = backbone.embed_dim
             patch_start_index = 1
 
         elif cfg.MODEL.BACKBONE.TYPE == "vit_large_patch16_224_ce":
-            backbone = vit_large_patch16_224_ce(mae_pretrained, drop_path_rate=cfg.TRAIN.DROP_PATH_RATE,
-                                                ce_loc=cfg.MODEL.BACKBONE.CE_LOC,
-                                                ce_keep_ratio=cfg.MODEL.BACKBONE.CE_KEEP_RATIO)
+            backbone = vit_large_patch16_224_ce_uwb(mae_pretrained, drop_path_rate=cfg.TRAIN.DROP_PATH_RATE,
+                                                    ce_loc=cfg.MODEL.BACKBONE.CE_LOC,
+                                                    ce_keep_ratio=cfg.MODEL.BACKBONE.CE_KEEP_RATIO)
             hidden_dim = backbone.embed_dim
             patch_start_index = 1
 

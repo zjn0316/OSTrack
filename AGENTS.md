@@ -5,7 +5,7 @@
 
 1.先读取AGENTS.md和UGTrack.md再进行后续操作
 2.使用UTF-8读取文件内容
-3.运行指令前需要先激活ostrack环境：conda activate ostrack
+3.运行指令前需要先激活ostrack环境：conda activate ostrack，我的conda目录在：D:\DeepLearning\Miniconda\envs\ostrack
 4.输出内容规范：文档/说明中文，代码英文，注释双语
 5.对于每一个聊天窗口，在vibe_coding生成对应标题的文件夹，文件夹内创建：进度.md、问题及解决措施.md、修改文件.md
 6.冒烟测试后删除相关脚本和生成文件

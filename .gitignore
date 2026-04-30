@@ -161,15 +161,17 @@ cython_debug/
 # lib/train/admin/local.py
 # lib/test/evaluation/local.py
 
-/data/
 .vscode/
-/output*/
+/data/
+/output/
 pretrained_models/
 script/
 /tensorboard/
-doc/UG-OSTrack.md
-doc/ugtrack.md
+doc/UGTrack需求文档.md
+doc/UGTrack设计文档.md
+UGTrack.md
 *.pth
 *.pth.tar
 *.pt
 *.ckpt
+

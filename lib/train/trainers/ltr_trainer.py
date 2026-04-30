@@ -153,7 +153,7 @@ class LTRTrainer(BaseTrainer):
             'search_images',
             'search_uwb_seq',
             'search_uwb_gt',
-            'search_alpha_gt',
+            'search_uwb_conf',
         ]
         for key in candidate_keys:
             value = data.get(key)

@@ -119,7 +119,7 @@ class UWBTrackingSampler(TrackingSampler):
                     'search_masks': search_masks,
                     'search_uwb_seq': search_anno['uwb_seq'] ,
                     'search_uwb_gt': search_anno['uwb_gt'] ,
-                    'search_alpha_gt': search_anno['alpha_gt'],
+                    'search_uwb_conf': search_anno['uwb_conf'],
 
                     'dataset': dataset.get_name(),
                     'test_class': meta_obj_test.get('object_class_name'),

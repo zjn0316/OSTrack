@@ -48,7 +48,7 @@ class UGTrack(BaseTracker):
 
         self.save_all_boxes = params.save_all_boxes
         self.z_dict1 = {}
-        self.uwb_noise = None
+        self.uwb_obs = None
         self.last_out_shapes = {}
 
     def initialize(self, image, info: dict):
@@ -67,7 +67,7 @@ class UGTrack(BaseTracker):
             ).squeeze(1)
             self.box_mask_z = generate_mask_cond(self.cfg, 1, template.tensors.device, template_bbox)
 
-        self.uwb_noise = self._load_uwb_noise(info.get("init_uwb_noise_path"))
+        self.uwb_obs = self._load_uwb_obs(info.get("init_uwb_obs_path"))
         self.state = info["init_bbox"]
         self.frame_id = 0
 
@@ -132,18 +132,18 @@ class UGTrack(BaseTracker):
             return {"target_bbox": self.state, "all_boxes": all_boxes.view(-1).tolist()}
         return {"target_bbox": self.state}
 
-    def _load_uwb_noise(self, uwb_noise_path):
-        if uwb_noise_path is None or not os.path.isfile(uwb_noise_path):
-            print("UGTrack warning: uwb_noise.txt not found, using zero UWB sequence.")
+    def _load_uwb_obs(self, uwb_obs_path):
+        if uwb_obs_path is None or not os.path.isfile(uwb_obs_path):
+            print("UGTrack warning: uwb_obs.txt not found, using zero UWB sequence.")
             return None
-        return np.loadtxt(uwb_noise_path, delimiter=",", dtype=np.float32)
+        return np.loadtxt(uwb_obs_path, delimiter=",", dtype=np.float32)
 
     def _build_search_uwb_seq(self, frame_id, height, width):
         seq_len = int(self.cfg.DATA.UWB.SEQ_LEN)
-        if self.uwb_noise is None:
+        if self.uwb_obs is None:
             seq = np.zeros((seq_len, 2), dtype=np.float32)
         else:
-            uv = self.uwb_noise[:, :2]
+            uv = self.uwb_obs[:, :2]
             max_id = uv.shape[0] - 1
             frame_id = min(max(frame_id, 0), max_id)
             hist_ids = [max(frame_id - seq_len + 1 + i, 0) for i in range(seq_len)]

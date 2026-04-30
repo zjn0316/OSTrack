@@ -1,6 +1,4 @@
 import torch
-import torch.nn.functional as F
-
 from .base_actor import BaseActor
 from lib.utils.box_ops import box_cxcywh_to_xyxy, box_xywh_to_xyxy
 from lib.utils.ce_utils import adjust_keep_rate, generate_mask_cond
@@ -90,19 +88,19 @@ class UGTrackActor(BaseActor):
         if self.stage == 1:
             # 提取真值
             search_uwb_gt = gt_dict["search_uwb_gt"].squeeze(0).float()
-            search_alpha_gt = gt_dict["search_alpha_gt"].squeeze(0).float()
+            search_uwb_conf = gt_dict["search_uwb_conf"].squeeze(0).float()
 
             # 计算 UWB 损失 (回归 + 置信度)
-            pred_loss = self.objective['uwb_pred'](pred_dict["uwb_pred"], search_uwb_gt[..., :2])
-            alpha_loss = self.objective['uwb_alpha'](pred_dict["uwb_alpha"], search_alpha_gt)
+            pred_loss = self.objective['uwb_pred'](pred_dict["pred_uv"], search_uwb_gt[..., :2])
+            conf_loss = self.objective['uwb_conf'](pred_dict["uwb_conf_logit"], search_uwb_conf)
 
-            loss = self.loss_weight["uwb_pred"] * pred_loss + self.loss_weight["uwb_alpha"] * alpha_loss
+            loss = self.loss_weight["uwb_pred"] * pred_loss + self.loss_weight["uwb_conf"] * conf_loss
 
             # 记录详细的状态字典，用于日志打印（如 Wandb/Tensorboard）
             status = {
                 "Loss/uwb_total": loss.item(),
                 "Loss/uwb_pred": pred_loss.item(),
-                "Loss/uwb_alpha": alpha_loss.item(),
+                "Loss/uwb_conf": conf_loss.item(),
             }
             return loss, status
 
@@ -156,8 +154,8 @@ class UGTrackActor(BaseActor):
                 "IoU": mean_iou.item(),
             }
             # [UGTrack独有] 记录 UWB 分支统计信息
-            if "uwb_alpha" in pred_dict:
-                status["UWB/alpha_mean"] = pred_dict["uwb_alpha"].detach().mean().item()
+            if "uwb_conf_pred" in pred_dict:
+                status["UWB/conf_mean"] = pred_dict["uwb_conf_pred"].detach().mean().item()
             return loss, status
         else:
             return loss

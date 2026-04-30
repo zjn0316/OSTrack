@@ -86,9 +86,26 @@ def run(settings):
     # 按训练阶段设置损失函数与 Actors
     # ====================
     if stage == 1:
-        # 损失函数字典
-        objective = {'uwb_pred': mse_loss, 'uwb_alpha': mse_loss}
-        loss_weight = {'uwb_pred': cfg.TRAIN.UWB_PRED_WEIGHT, 'uwb_alpha': cfg.TRAIN.UWB_ALPHA_WEIGHT}
+        coord_loss_name = str(getattr(cfg.TRAIN, "UWB_COORD_LOSS", "l1")).lower()
+        conf_loss_name = str(getattr(cfg.TRAIN, "UWB_CONF_LOSS", "bce")).lower()
+
+        if coord_loss_name == "l1":
+            uwb_pred_loss = l1_loss
+        elif coord_loss_name == "mse":
+            uwb_pred_loss = mse_loss
+        else:
+            raise ValueError("Unsupported UWB_COORD_LOSS: {}".format(coord_loss_name))
+
+        if conf_loss_name == "bce":
+            uwb_conf_loss = BCEWithLogitsLoss()
+        elif conf_loss_name == "mse":
+            uwb_conf_loss = mse_loss
+        else:
+            raise ValueError("Unsupported UWB_CONF_LOSS: {}".format(conf_loss_name))
+
+        # Loss dictionary / 损失函数字典
+        objective = {'uwb_pred': uwb_pred_loss, 'uwb_conf': uwb_conf_loss}
+        loss_weight = {'uwb_pred': cfg.TRAIN.UWB_PRED_WEIGHT, 'uwb_conf': cfg.TRAIN.UWB_CONF_WEIGHT}
     else:
         focal_loss = FocalLoss()
         # 损失函数字典

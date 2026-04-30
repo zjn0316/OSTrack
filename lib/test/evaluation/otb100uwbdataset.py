@@ -62,9 +62,9 @@ class OTB100UWBDataset(BaseDataset):
         init_data = {
             0: {
                 "bbox": ground_truth_rect[init_omit, :],
-                "uwb_noise_path": '{}/{}/{}/uwb_noise.txt'.format(self.base_path, self.split, sequence_path),
+                "uwb_obs_path": '{}/{}/{}/uwb_obs.txt'.format(self.base_path, self.split, sequence_path),
                 "uwb_gt_path": '{}/{}/{}/uwb_gt.txt'.format(self.base_path, self.split, sequence_path),
-                "alpha_gt_path": '{}/{}/{}/alpha_gt.txt'.format(self.base_path, self.split, sequence_path),
+                "uwb_conf_path": '{}/{}/{}/uwb_conf.txt'.format(self.base_path, self.split, sequence_path),
             }
         }
 

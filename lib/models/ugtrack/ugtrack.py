@@ -13,17 +13,10 @@ from lib.models.ugtrack.uwb_branch import build_uwb_branch
 class UGTrack(nn.Module):
     """This is the base class for UGTrack."""
 
-    def __init__(self, uwb_branch, tracker=None, freeze_uwb_encoder=False):
+    def __init__(self, uwb_branch, tracker=None):
         super().__init__()
         self.uwb_branch = uwb_branch
         self.tracker = tracker
-        self.freeze_uwb_encoder = freeze_uwb_encoder
-        if self.freeze_uwb_encoder:
-            self.freeze_uwb()
-
-    def freeze_uwb(self):
-        for param in self.uwb_branch.parameters():
-            param.requires_grad = False
 
     def forward(self,
                 search_uwb_seq,
@@ -52,9 +45,6 @@ class UGTrack(nn.Module):
         return out
 
     def forward_uwb(self, search_uwb_seq, stage):
-        if stage == 2 and self.freeze_uwb_encoder:
-            with torch.no_grad():
-                return self.uwb_branch(search_uwb_seq)
         return self.uwb_branch(search_uwb_seq)
 
     def forward_tracker(self,
@@ -145,5 +135,4 @@ def build_ugtrack(cfg, training=True):
     return UGTrack(
         uwb_branch=uwb_branch,
         tracker=tracker,
-        freeze_uwb_encoder=bool(getattr(cfg.TRAIN, "FREEZE_UWB_ENCODER", False)),
     )

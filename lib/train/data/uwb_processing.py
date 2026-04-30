@@ -29,22 +29,22 @@ class UWBProcessing(BaseProcessing):
 
     def __call__(self, data: TensorDict):
         """
-        参数:
-            data - 输入数据，通常应包含以下字段：
-                   'template_images'、'search_images'、'template_anno'、'search_anno'、
-                   'search_uwb_seq'、'search_uwb_gt'、'search_alpha_gt'。
-        返回:
-            TensorDict - 处理后的数据字典。
+        鍙傛暟:
+            data - 杈撳叆鏁版嵁锛岄€氬父搴斿寘鍚互涓嬪瓧娈碉細
+                   'template_images'銆?search_images'銆?template_anno'銆?search_anno'銆?
+                   'search_uwb_seq'銆?search_uwb_gt'銆?search_uwb_conf'銆?
+        杩斿洖:
+            TensorDict - 澶勭悊鍚庣殑鏁版嵁瀛楀吀銆?
         """
-        # 若缺少 UWB 字段，则直接标记为无效
-        if not all(k in data for k in ['search_uwb_seq', 'search_uwb_gt', 'search_alpha_gt']):
+        # 鑻ョ己灏?UWB 瀛楁锛屽垯鐩存帴鏍囪涓烘棤鏁?
+        if not all(k in data for k in ['search_uwb_seq', 'search_uwb_gt', 'search_uwb_conf']):
             data['valid'] = False
             return data
 
-        # 整理 alpha 标注形状
-        data['search_alpha_gt'] = uwb_prutils.format_search_alpha_gt(data['search_alpha_gt'])
 
-        # 应用联合变换
+        data['search_uwb_conf'] = uwb_prutils.format_search_uwb_conf(data['search_uwb_conf'])
+
+        # 搴旂敤鑱斿悎鍙樻崲
         if self.transform['joint'] is not None:
             data['template_images'], data['template_anno'], data['template_masks'] = self.transform['joint'](
                 image=data['template_images'], bbox=data['template_anno'], mask=data['template_masks'])
@@ -58,10 +58,10 @@ class UWBProcessing(BaseProcessing):
             assert self.mode == 'sequence' or len(data[s + '_images']) == 1, \
                 "In pair mode, num template/search frames must be 1"
 
-            # 扰动bbox
+            # 鎵板姩bbox
             jittered_anno = [self._get_jittered_box(a, s) for a in data[s + '_anno']]
 
-            # 避免bbox过小
+            # 閬垮厤bbox杩囧皬
             w, h = torch.stack(jittered_anno, dim=0)[:, 2], torch.stack(jittered_anno, dim=0)[:, 3]
             crop_sz = torch.ceil(torch.sqrt(w * h) * self.search_area_factor[s])
             if (crop_sz < 1).any():
@@ -69,36 +69,36 @@ class UWBProcessing(BaseProcessing):
                 return data
 
             if s == 'search':
-                # 以扰动后的目标为中心裁剪区域，生成注意力掩码，
-                # 并同步将 UWB 序列与 UWB 标注映射到裁剪后坐标系
+                # 浠ユ壈鍔ㄥ悗鐨勭洰鏍囦负涓績瑁佸壀鍖哄煙锛岀敓鎴愭敞鎰忓姏鎺╃爜锛?
+                # 骞跺悓姝ュ皢 UWB 搴忓垪涓?UWB 鏍囨敞鏄犲皠鍒拌鍓悗鍧愭爣绯?
                 crops, boxes, att_mask, mask_crops = prutils.jittered_center_crop(
                     data[s + '_images'], jittered_anno, data[s + '_anno'], self.search_area_factor[s],
                     self.output_sz[s], masks=data[s + '_masks'])
                 data['search_uwb_seq'], data['search_uwb_gt'] = uwb_prutils.jittered_center_crop_uwb(
                     data['search_uwb_seq'], data['search_uwb_gt'], jittered_anno,
                     self.search_area_factor[s], self.output_sz[s])
-                # 应用独立transform
+                # 搴旂敤鐙珛transform
                 data[s + '_images'], data[s + '_anno'], data[s + '_att'], data[s + '_masks'], \
                     data['search_uwb_seq'], data['search_uwb_gt'] = uwb_tfm.apply_transform_with_uwb(
                         self.transform[s],
                         image=crops, bbox=boxes, att=att_mask, mask=mask_crops,
                         uwb_seq=data['search_uwb_seq'], uwb_gt=data['search_uwb_gt'], joint=False)
             else:
-                # 以扰动后的目标为中心裁剪区域，生成注意力掩码
+                # 浠ユ壈鍔ㄥ悗鐨勭洰鏍囦负涓績瑁佸壀鍖哄煙锛岀敓鎴愭敞鎰忓姏鎺╃爜
                 crops, boxes, att_mask, mask_crops = prutils.jittered_center_crop(
                     data[s + '_images'], jittered_anno, data[s + '_anno'], self.search_area_factor[s],
                     self.output_sz[s], masks=data[s + '_masks'])
-                # 应用独立transform
+                # 搴旂敤鐙珛transform
                 data[s + '_images'], data[s + '_anno'], data[s + '_att'], data[s + '_masks'] = self.transform[s](
                     image=crops, bbox=boxes, att=att_mask, mask=mask_crops, joint=False)
 
-            # 检查注意力掩码是否全为 1（无效）
+            # 妫€鏌ユ敞鎰忓姏鎺╃爜鏄惁鍏ㄤ负 1锛堟棤鏁堬級
             for ele in data[s + '_att']:
                 if (ele == 1).all():
                     data['valid'] = False
                     return data
 
-                # 检查下采样后是否全为 1（无效）
+                # 妫€鏌ヤ笅閲囨牱鍚庢槸鍚﹀叏涓?1锛堟棤鏁堬級
                 feat_size = self.output_sz[s] // 16
                 mask_down = F.interpolate(ele[None, None].float(), size=feat_size).to(torch.bool)[0]
                 if (mask_down == 1).all():
@@ -106,12 +106,12 @@ class UWBProcessing(BaseProcessing):
                     return data
 
         data['valid'] = True
-        # 若使用 copy-and-paste 增强但未提供 mask，则补零 mask
+        # 鑻ヤ娇鐢?copy-and-paste 澧炲己浣嗘湭鎻愪緵 mask锛屽垯琛ラ浂 mask
         if data["template_masks"] is None or data["search_masks"] is None:
             data["template_masks"] = torch.zeros((1, self.output_sz["template"], self.output_sz["template"]))
             data["search_masks"] = torch.zeros((1, self.output_sz["search"], self.output_sz["search"]))
 
-        # 整理输出张量形状
+        # 鏁寸悊杈撳嚭寮犻噺褰㈢姸
         if self.mode == 'sequence':
             data = data.apply(stack_tensors)
         else:

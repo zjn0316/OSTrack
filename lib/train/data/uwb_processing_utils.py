@@ -55,13 +55,13 @@ def jittered_center_crop_uwb(uwb_seq, uwb_gt, box_extract, search_area_factor, o
     return uwb_seq_crop, uwb_gt_crop
 
 
-def format_search_alpha_gt(search_alpha_gt):
+def format_search_uwb_conf(search_uwb_conf):
     out = []
-    for a in search_alpha_gt:
-        a = as_float_tensor(a)
-        if a.ndim == 0:
-            a = a.unsqueeze(0)
-        elif a.ndim > 1:
-            a = a.reshape(-1)[:1]
-        out.append(a)
+    for conf in search_uwb_conf:
+        conf = as_float_tensor(conf)
+        if conf.ndim == 0:
+            conf = conf.unsqueeze(0)
+        elif conf.ndim > 1:
+            conf = conf.reshape(-1)[:1]
+        out.append(conf)
     return out

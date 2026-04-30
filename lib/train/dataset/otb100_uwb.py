@@ -130,10 +130,10 @@ class OTB100UWB(BaseVideoDataset):
         uwb_gt = pandas.read_csv(uwb_gt_file, delimiter=',', header=None, dtype=np.float32, na_filter=False, low_memory=False).values
         return torch.tensor(uwb_gt, dtype=torch.float32)
 
-    def _read_uwb_noise_anno(self, seq_path):
-        uwb_noise_file = os.path.join(seq_path, "uwb_noise.txt")
-        uwb_noise = pandas.read_csv(uwb_noise_file, delimiter=',', header=None, dtype=np.float32, na_filter=False, low_memory=False).values
-        return torch.tensor(uwb_noise, dtype=torch.float32)
+    def _read_uwb_obs_anno(self, seq_path):
+        uwb_obs_file = os.path.join(seq_path, "uwb_obs.txt")
+        uwb_obs = pandas.read_csv(uwb_obs_file, delimiter=',', header=None, dtype=np.float32, na_filter=False, low_memory=False).values
+        return torch.tensor(uwb_obs, dtype=torch.float32)
 
 
     def _build_uwb_seq(self, seq_path, uwb):
@@ -151,10 +151,10 @@ class OTB100UWB(BaseVideoDataset):
 
         return torch.stack(uwb_seq)
 
-    def _read_alpha_gt_anno(self, seq_path):
-        alpha_file = os.path.join(seq_path, "alpha_gt.txt")
-        alpha = pandas.read_csv(alpha_file, header=None, dtype=np.float32, na_filter=False, low_memory=False).values.reshape(-1)
-        return torch.tensor(alpha, dtype=torch.float32)
+    def _read_uwb_conf_anno(self, seq_path):
+        uwb_conf_file = os.path.join(seq_path, "uwb_conf.txt")
+        uwb_conf = pandas.read_csv(uwb_conf_file, header=None, dtype=np.float32, na_filter=False, low_memory=False).values.reshape(-1)
+        return torch.tensor(uwb_conf, dtype=torch.float32)
     
     def _build_sequence_info(self, seq_id):
         seq_path = self._get_sequence_path(seq_id)
@@ -164,10 +164,10 @@ class OTB100UWB(BaseVideoDataset):
         visible, visible_ratio = self._read_target_visible(seq_path)
 
         uwb_gt = self._read_uwb_gt_anno(seq_path)
-        uwb_noise = self._read_uwb_noise_anno(seq_path)
-        uwb_seq = self._build_uwb_seq(seq_path, uwb_noise)
+        uwb_obs = self._read_uwb_obs_anno(seq_path)
+        uwb_seq = self._build_uwb_seq(seq_path, uwb_obs)
 
-        alpha_gt = self._read_alpha_gt_anno(seq_path)
+        uwb_conf = self._read_uwb_conf_anno(seq_path)
 
 
         return {
@@ -176,9 +176,9 @@ class OTB100UWB(BaseVideoDataset):
             'visible': visible,
             'visible_ratio': visible_ratio,
             'uwb_gt': uwb_gt,
-            'uwb_noise': uwb_noise,
+            'uwb_obs': uwb_obs,
             'uwb_seq': uwb_seq,
-            'alpha_gt': alpha_gt,
+            'uwb_conf': uwb_conf,
         }
 
     def get_sequence_info(self, seq_id):
@@ -226,7 +226,7 @@ print(f"Loading sequence: {seq_name}")
 
 # 3. 获取完整序列标注 (通常由 Sampler 内部缓存)
 seq_info = dataset.get_sequence_info(seq_id)
-# 返回值字段包括: bbox[N,4], valid[N], visible[N], uwb_gt[N,5], uwb_noise[N,5], uwb_seq[N,5,2], alpha_gt[N]
+# 返回值字段包括: bbox[N,4], valid[N], visible[N], uwb_gt[N,5], uwb_obs[N,5], uwb_seq[N,5,2], uwb_conf[N]
 
 # 4. 提取特定帧的数据 (模拟一次训练采样)
 frame_ids = [0, 50, 100]  # 请求第1帧、第51帧和第101帧
@@ -237,7 +237,7 @@ frame_list, anno_frames, obj_meta = dataset.get_frames(seq_id, frame_ids, anno=s
 # - anno_frames: 标注字典，每个 key 对应长度为 3 的列表。
 #   例如: anno_frames['bbox'][0] 是第1帧的 [x, y, w, h] Tensor。
 #         anno_frames['uwb_seq'][0] 是第1帧对应的 [5, 2] 历史 UWB 序列。
-#         anno_frames['alpha_gt'][0] 是第1帧的 alpha 比例标量。
+#         anno_frames['uwb_conf'][0] 是第1帧的 uwb_conf 比例标量。
 # - obj_meta: 包含序列元数据，如 {'object_class_name': 'Panda', ...}
 --------------------------------------------------
 """

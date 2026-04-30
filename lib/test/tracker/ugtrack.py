@@ -41,10 +41,13 @@ class UGTrack(BaseTracker):
         if self.debug:
             if not self.use_visdom:
                 self.save_dir = "debug"
-                if not os.path.exists(self.save_dir):
-                    os.makedirs(self.save_dir)
+                self._init_debug_dirs()
             else:
                 self._init_visdom(None, 1)
+                if self.visdom is None:
+                    self.use_visdom = False
+                    self.save_dir = "debug"
+                    self._init_debug_dirs()
 
         self.save_all_boxes = params.save_all_boxes
         self.z_dict1 = {}
@@ -114,9 +117,12 @@ class UGTrack(BaseTracker):
                 cv2.rectangle(image_bgr, (int(x1), int(y1)), (int(x1 + w), int(y1 + h)),
                               color=(0, 0, 255), thickness=2)
                 cv2.imwrite(os.path.join(self.save_dir, "%04d.jpg" % self.frame_id), image_bgr)
+                self._save_debug_search_images(x_patch_arr, out_dict)
             else:
                 self.visdom.register((image, info["gt_bbox"].tolist(), self.state), "Tracking", 1, "Tracking")
                 self.visdom.register(torch.from_numpy(x_patch_arr).permute(2, 0, 1), "image", 1, "search_region")
+                self.visdom.register(torch.from_numpy(x_patch_arr).permute(2, 0, 1),
+                                     "image", 1, "search_before_pruning")
                 self.visdom.register(torch.from_numpy(self.z_patch_arr).permute(2, 0, 1), "image", 1, "template")
                 self.visdom.register(pred_score_map.view(self.feat_sz, self.feat_sz), "heatmap", 1, "score_map")
                 self.visdom.register((pred_score_map * self.output_window).view(self.feat_sz, self.feat_sz),
@@ -126,11 +132,36 @@ class UGTrack(BaseTracker):
                     masked_search = gen_visualization(x_patch_arr, removed_indexes_s)
                     self.visdom.register(torch.from_numpy(masked_search).permute(2, 0, 1),
                                          "image", 1, "masked_search")
+                if torch.is_tensor(out_dict.get("uwb_layer0_removed_indexes_s")):
+                    layer0_removed = [out_dict["uwb_layer0_removed_indexes_s"].cpu().numpy()]
+                    layer0_search = gen_visualization(x_patch_arr, layer0_removed)
+                    self.visdom.register(torch.from_numpy(layer0_search).permute(2, 0, 1),
+                                         "image", 1, "uwb_pruned_search_layer0")
+                    self.visdom.register(torch.from_numpy(layer0_search).permute(2, 0, 1),
+                                         "image", 1, "search_after_layer0_pruning")
 
         if self.save_all_boxes:
             all_boxes = self.map_box_back_batch(pred_boxes * self.params.search_size / resize_factor, resize_factor)
             return {"target_bbox": self.state, "all_boxes": all_boxes.view(-1).tolist()}
         return {"target_bbox": self.state}
+
+    def _init_debug_dirs(self):
+        os.makedirs(self.save_dir, exist_ok=True)
+        os.makedirs(os.path.join(self.save_dir, "search_before_pruning"), exist_ok=True)
+        os.makedirs(os.path.join(self.save_dir, "search_after_layer0_pruning"), exist_ok=True)
+
+    def _save_debug_search_images(self, x_patch_arr, out_dict):
+        frame_name = "%04d.jpg" % self.frame_id
+        before_path = os.path.join(self.save_dir, "search_before_pruning", frame_name)
+        before_bgr = cv2.cvtColor(x_patch_arr, cv2.COLOR_RGB2BGR)
+        cv2.imwrite(before_path, before_bgr)
+
+        if torch.is_tensor(out_dict.get("uwb_layer0_removed_indexes_s")):
+            layer0_removed = [out_dict["uwb_layer0_removed_indexes_s"].cpu().numpy()]
+            layer0_search = gen_visualization(x_patch_arr, layer0_removed)
+            after_path = os.path.join(self.save_dir, "search_after_layer0_pruning", frame_name)
+            after_bgr = cv2.cvtColor(layer0_search.astype(np.uint8), cv2.COLOR_RGB2BGR)
+            cv2.imwrite(after_path, after_bgr)
 
     def _load_uwb_obs(self, uwb_obs_path):
         if uwb_obs_path is None or not os.path.isfile(uwb_obs_path):

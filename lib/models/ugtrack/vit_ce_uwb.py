@@ -28,7 +28,9 @@ class VisionTransformerCEUWB(VisionTransformerCE):
     def forward_features(self, z, x, mask_z=None, mask_x=None,
                          ce_template_mask=None, ce_keep_rate=None,
                          return_last_attn=False,
-                         uwb_token=None):
+                         uwb_token=None,
+                         pred_uv=None,
+                         uwb_conf_pred=None):
         B, H, W = x.shape[0], x.shape[2], x.shape[3]
 
         x = self.patch_embed(x)
@@ -58,41 +60,48 @@ class VisionTransformerCEUWB(VisionTransformerCE):
             x += self.search_segment_pos_embed
             z += self.template_segment_pos_embed
 
-        x = combine_tokens(z, x, mode=self.cat_mode)
+        lens_z = self.pos_embed_z.shape[1]
+        lens_x = self.pos_embed_x.shape[1]
+        global_index_s = torch.arange(lens_x, device=x.device).unsqueeze(0).repeat(B, 1)
+        uwb_layer0_removed_index_s = None
+        uwb_keep_ratio = 1.0
+        if self.uwb_pruner is not None and pred_uv is not None:
+            x, global_index_s, uwb_layer0_removed_index_s, uwb_keep_ratio = self.uwb_pruner(
+                x, pred_uv, uwb_conf_pred
+            )
 
         # ---- UWB: append token ----
         has_uwb = uwb_token is not None
         if has_uwb:
             if uwb_token.ndim == 2:
                 uwb_token = uwb_token.unsqueeze(1)
-            x = torch.cat([x, uwb_token], dim=1)
+            if self.cat_mode != "direct":
+                raise NotImplementedError("VisionTransformerCEUWB supports UWB token with direct cat_mode only")
+            # Keep UWB on the template side before CE slicing.
+            # 将 UWB 放在 template 侧，避免 CE 按前缀长度切分时误认为它是 search token。
+            x = torch.cat([z, uwb_token, x], dim=1)
+        else:
+            x = combine_tokens(z, x, mode=self.cat_mode)
 
         if self.add_cls_token:
             x = torch.cat([cls_tokens, x], dim=1)
 
         x = self.pos_drop(x)
 
-        lens_z = self.pos_embed_z.shape[1]
-        lens_x = self.pos_embed_x.shape[1]
-
         # CE index tracking
         global_index_t = torch.linspace(0, lens_z - 1, lens_z).to(x.device)
         global_index_t = global_index_t.repeat(B, 1)
 
-        global_index_s = torch.linspace(0, lens_x - 1, lens_x).to(x.device)
-        global_index_s = global_index_s.repeat(B, 1)
-
         # ---- UWB: expand global_index_t to mark UWB as template-side ----
-        # This prevents CE candidate_elimination from counting UWB as search,
-        # because lens_t = global_index_t.shape[1] and CE computes
-        #   lens_s = total_len - lens_t
-        #   tokens_s = tokens[:, lens_t:]
+        # CE slices tokens by prefix length, so UWB is physically placed after
+        # template tokens and before search tokens.
+        # CE 通过前缀长度切分 token，因此 UWB 必须实际位于 template 与 search 中间。
         if has_uwb:
             uwb_idx = torch.full(
                 (B, 1), lens_z, device=x.device, dtype=global_index_t.dtype)
             global_index_t = torch.cat([global_index_t, uwb_idx], dim=1)
 
-        removed_indexes_s = []
+        removed_indexes_s = [uwb_layer0_removed_index_s] if uwb_layer0_removed_index_s is not None else []
         for i, blk in enumerate(self.blocks):
             x, global_index_t, global_index_s, removed_index_s, attn = \
                 blk(x, global_index_t, global_index_s, mask_x,
@@ -139,6 +148,9 @@ class VisionTransformerCEUWB(VisionTransformerCE):
         aux_dict = {
             "attn": attn,
             "removed_indexes_s": removed_indexes_s,
+            "uwb_layer0_removed_indexes_s": uwb_layer0_removed_index_s,
+            "uwb_prune_keep_ratio": uwb_keep_ratio,
+            "uwb_prune_keep_tokens": global_index_s.shape[1],
         }
 
         return x, aux_dict
@@ -146,12 +158,16 @@ class VisionTransformerCEUWB(VisionTransformerCE):
     def forward(self, z, x, ce_template_mask=None, ce_keep_rate=None,
                 tnc_keep_rate=None,
                 return_last_attn=False,
-                uwb_token=None):
+                uwb_token=None,
+                pred_uv=None,
+                uwb_conf_pred=None):
         x, aux_dict = self.forward_features(
             z, x,
             ce_template_mask=ce_template_mask,
             ce_keep_rate=ce_keep_rate,
-            uwb_token=uwb_token)
+            uwb_token=uwb_token,
+            pred_uv=pred_uv,
+            uwb_conf_pred=uwb_conf_pred)
         return x, aux_dict
 
 

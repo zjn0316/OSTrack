@@ -4,8 +4,9 @@ import torch
 from torch import nn
 
 from lib.models.layers.head import build_box_head
-from lib.models.ostrack.ostrack import OSTrack
-from lib.models.ostrack.vit import vit_base_patch16_224
+from lib.models.ugtrack.ostrack_uwb import OSTrackUWB
+from lib.models.ugtrack.uwb_pruning import build_uwb_guided_pruner
+from lib.models.ugtrack.vit_uwb import vit_base_patch16_224_uwb
 from lib.models.ugtrack.vit_ce_uwb import (
     vit_base_patch16_224_ce_uwb,
     vit_large_patch16_224_ce_uwb,
@@ -40,6 +41,8 @@ class UGTrack(nn.Module):
             template=template,
             search=search,
             uwb_token=uwb_out["uwb_token"],
+            pred_uv=uwb_out["pred_uv"],
+            uwb_conf_pred=uwb_out["uwb_conf_pred"],
             ce_template_mask=ce_template_mask,
             ce_keep_rate=ce_keep_rate,
             return_last_attn=return_last_attn,
@@ -54,6 +57,8 @@ class UGTrack(nn.Module):
                         template,
                         search,
                         uwb_token,
+                        pred_uv=None,
+                        uwb_conf_pred=None,
                         ce_template_mask=None,
                         ce_keep_rate=None,
                         return_last_attn=False):
@@ -66,6 +71,8 @@ class UGTrack(nn.Module):
             template=template,
             search=search,
             uwb_token=uwb_token,
+            pred_uv=pred_uv,
+            uwb_conf_pred=uwb_conf_pred,
             ce_template_mask=ce_template_mask,
             ce_keep_rate=ce_keep_rate,
             return_last_attn=return_last_attn,
@@ -98,7 +105,7 @@ def build_ugtrack(cfg, training=True):
     tracker = None
     if int(getattr(cfg.TRAIN, "STAGE", 1)) == 2:
         if cfg.MODEL.BACKBONE.TYPE == "vit_base_patch16_224":
-            backbone = vit_base_patch16_224(mae_pretrained, drop_path_rate=cfg.TRAIN.DROP_PATH_RATE)
+            backbone = vit_base_patch16_224_uwb(mae_pretrained, drop_path_rate=cfg.TRAIN.DROP_PATH_RATE)
             hidden_dim = backbone.embed_dim
             patch_start_index = 1
 
@@ -120,8 +127,10 @@ def build_ugtrack(cfg, training=True):
             raise NotImplementedError
 
         backbone.finetune_track(cfg=cfg, patch_start_index=patch_start_index)
+        if bool(getattr(cfg.MODEL.BACKBONE, "UWB_PRUNE_ENABLE", False)):
+            backbone.uwb_pruner = build_uwb_guided_pruner(cfg)
         box_head = build_box_head(cfg, hidden_dim)
-        tracker = OSTrack(backbone, box_head, aux_loss=False, head_type=cfg.MODEL.HEAD.TYPE)
+        tracker = OSTrackUWB(backbone, box_head, aux_loss=False, head_type=cfg.MODEL.HEAD.TYPE)
 
         # =====================
         # 加载已训练 OSTrack tracker 权重

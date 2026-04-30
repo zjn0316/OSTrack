@@ -54,6 +54,14 @@ UWB时序输入 [B, T, 2]
 - `UWB_TCN_KERNEL_SIZE`：卷积核大小，默认 `3`（必须为奇数）。
 - `UWB_TCN_DROPOUT`：Dropout 率，默认 `0.1`。
 
+**第 0 层 UWB 引导剪枝参数：**
+
+- `UWB_PRUNE_ENABLE`：是否启用第 0 层 UWB 引导剪枝，默认 `False`。
+- `UWB_PRUNE_KEEP_RATIO`：关闭动态置信度时使用的固定 search token 保留率，默认 `0.5`。
+- `UWB_PRUNE_MIN_KEEP_RATIO`：动态剪枝下的最小保留率，默认 `0.25`。
+- `UWB_PRUNE_MAX_KEEP_RATIO`：动态剪枝下的最大保留率，默认 `1.0`。
+- `UWB_PRUNE_CONF_DYNAMIC`：是否根据 `uwb_conf_pred` 动态调整保留率，默认 `True`。置信度越高，剪枝越激进；置信度越低，越接近保守保留。
+
 #### HEAD（UWB 输出头）
 
 - `UWB_TOKEN_HEAD`：UWB token 投影头类型。`"mlp"`（默认，128→256→768 含 LayerNorm）或 `"identity"`（直通，不使用 token 注入时可选）。
@@ -82,6 +90,7 @@ UWB时序输入 [B, T, 2]
 - 冻结 `encoder` + `pred_head` + `conf_head`（UWB prior），仅训练 `token_head` + 视觉跟踪器。
 - 以下 OSTrack 的跟踪损失参数在 Stage-2 生效：`GIOU_WEIGHT`、`L1_WEIGHT`、`BACKBONE_MULTIPLIER`。
 - CE 相关参数（`CE_LOC`、`CE_KEEP_RATIO` 等）仅在 Stage-2 + CE backbone 时生效。
+- 第 0 层 UWB 引导剪枝在 Stage-2 生效，基于 `pred_uv` 和 `uwb_conf_pred` 对 search patch token 做空间 Top-K，并在进入跟踪头前恢复到完整 16×16 search token 网格。
 
 ------
 
@@ -101,11 +110,12 @@ UGTrack 测试使用与 OSTrack 相同的 `TEMPLATE_FACTOR`、`TEMPLATE_SIZE`、
 | Stage-1 MLP 基线 | `mlp` | 10 | 100 | 256 | MLP 轻量基线 |
 | Stage-1 长序列 | `tcn` | 20 | 100 | 256 | 增大 SEQ_LEN 消融 |
 | Stage-2 联合训练 | 同上（冻结） | 10 | — | — | 加载 Stage-1 checkpoint 后冻结 prior |
+| Stage-2 token-prune 调试 | `tcn` | 10 | — | — | `UWB_PRUNE_ENABLE=True`，`python tracking/test.py ugtrack <yaml> --debug 1` 可在 visdom 查看剪枝后的 search 图 |
 
 ------
 
 ### 6. 与 OSTrack YAML 的差异概括
 
-- **新增**：UWB 编码器选型、UWB 时序长度、UWB 输出头参数、UWB 损失配置。
+- **新增**：UWB 编码器选型、UWB 时序长度、UWB 输出头参数、UWB 损失配置、第 0 层 UWB 引导剪枝配置。
 - **移除**：Stage-1 不需要视觉主干配置（`BACKBONE.TYPE`、`PRETRAIN_FILE` 仅在 Stage-2 生效）。
 - **共用**：数据增强（`CENTER_JITTER`、`SCALE_JITTER`）、训练基础参数（`LR`、`BATCH_SIZE`）与 OSTrack 保持一致。

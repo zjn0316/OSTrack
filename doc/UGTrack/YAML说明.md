@@ -93,6 +93,11 @@ UWB时序输入 [B, T, 2]
 - CE 相关参数（`CE_LOC`、`CE_KEEP_RATIO` 等）仅在 Stage-2 + CE backbone 时生效。
 - 第 0 层 UWB 引导剪枝在 Stage-2 生效，基于 `pred_uv` 和 `uwb_conf_pred` 对 search patch token 做空间 Top-K，并在进入跟踪头前恢复到完整 16×16 search token 网格。
 
+**冗余配置检查：**
+
+- 当前 UGTrack 训练调度器仅支持 `TRAIN.SCHEDULER.TYPE="step"`，实际学习率衰减由 `TRAIN.LR_DROP_EPOCH` 控制。
+- `TRAIN.SCHEDULER.DECAY_RATE` 未被 UGTrack 代码读取，已从 `lib/config/ugtrack/config.py` 移除，避免配置项与实际行为不一致。
+
 ------
 
 ### 4. TEST（测试参数，与 OSTrack 一致）

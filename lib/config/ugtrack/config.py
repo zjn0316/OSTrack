@@ -107,7 +107,6 @@ cfg.TRAIN.DROP_PATH_RATE = 0.1
 
 cfg.TRAIN.SCHEDULER = edict()
 cfg.TRAIN.SCHEDULER.TYPE = "step"
-cfg.TRAIN.SCHEDULER.DECAY_RATE = 0.1
 
 # Test / 测试
 cfg.TEST = edict()

@@ -145,16 +145,18 @@ class VisionTransformerCEUWB(VisionTransformerCE):
         global_index_s = torch.arange(lens_x, device=x.device).unsqueeze(0).repeat(B, 1)
         uwb_layer0_removed_index_s = None
         uwb_keep_ratio = 1.0
+        # UWB 引导的搜索 token 剪枝（Layer‑0 级）
         if self.uwb_pruner is not None and pred_uv is not None:
             x, global_index_s, uwb_layer0_removed_index_s, uwb_keep_ratio = self.uwb_pruner(
                 x, pred_uv, uwb_conf_pred
             )
 
-        # ---- UWB: append token after search ----
+        # 拼接[模板、搜索、UWB]
         has_uwb = uwb_token is not None
         if has_uwb:
             if uwb_token.ndim == 2:
                 uwb_token = uwb_token.unsqueeze(1)
+            # pos_embedding
             uwb_token = uwb_token + self.uwb_pos_embed.to(device=uwb_token.device, dtype=uwb_token.dtype)
             if self.cat_mode != "direct":
                 raise NotImplementedError("VisionTransformerCEUWB supports UWB token with direct cat_mode only")
@@ -216,9 +218,12 @@ class VisionTransformerCEUWB(VisionTransformerCE):
 
         x = recover_tokens(x, lens_z, lens_x, mode=self.cat_mode)
 
-        # ---- UWB: re-concatenate as [Template, Search, UWB] ----
+        # ---- UWB: discard before OSTrack head ----
+        # UWB participates in ViT fusion, but the head expects the last 256
+        # tokens to be the restored search grid.
+        # UWB 参与 ViT 内部融合；输出给 OSTrack head 前丢弃，保证最后 256 个 token 是 search。
         if has_uwb:
-            x = torch.cat([z, x, uwb_out], dim=1)
+            x = torch.cat([z, x], dim=1)
         else:
             x = torch.cat([z, x], dim=1)
 

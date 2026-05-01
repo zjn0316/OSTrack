@@ -1,6 +1,8 @@
 """Non-CE ViT backbone with UGTrack UWB token and layer-0 pruning support."""
 
 import torch
+from torch import nn
+from timm.models.layers import trunc_normal_
 
 from lib.models.ostrack.utils import combine_tokens, recover_tokens
 from lib.models.ostrack.vit import VisionTransformer
@@ -16,6 +18,12 @@ class VisionTransformerUWB(VisionTransformer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.uwb_pruner = None
+        self.uwb_pos_embed = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
+        trunc_normal_(self.uwb_pos_embed, std=.02)
+
+    @torch.jit.ignore
+    def no_weight_decay(self):
+        return super().no_weight_decay() | {"uwb_pos_embed"}
 
     def forward_features(self, z, x, mask_z=None, mask_x=None,
                          ce_template_mask=None, ce_keep_rate=None,
@@ -54,6 +62,7 @@ class VisionTransformerUWB(VisionTransformer):
         if has_uwb:
             if uwb_token.ndim == 2:
                 uwb_token = uwb_token.unsqueeze(1)
+            uwb_token = uwb_token + self.uwb_pos_embed.to(device=uwb_token.device, dtype=uwb_token.dtype)
             x = torch.cat([x, uwb_token], dim=1)
 
         if self.add_cls_token:

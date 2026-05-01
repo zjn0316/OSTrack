@@ -164,6 +164,7 @@ cython_debug/
 .vscode/
 /data/
 /output/
+/debug/
 pretrained_models/
 script/
 /tensorboard/

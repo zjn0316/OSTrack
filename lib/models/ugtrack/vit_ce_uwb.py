@@ -1,13 +1,15 @@
 """CE backbone with UWB token compatibility.
 
 Extends VisionTransformerCE to support [Template, Search, UWB] token injection.
-UWB token is protected from being misinterpreted as a search token during
-CE candidate elimination by extending global_index_t.
+UWB token is protected from candidate elimination by pruning only the search
+span and keeping the tail UWB token in the sequence.
 
 Intended use (per AGENTS.md rule #8):
   This replaces lib/models/ostrack/vit_ce.py for UGTrack Stage-2,
   without modifying the original OSTrack files.
 """
+
+import math
 
 import torch
 from torch import nn
@@ -20,9 +22,9 @@ from lib.models.ostrack.utils import combine_tokens, recover_tokens
 class VisionTransformerCEUWB(VisionTransformerCE):
     """CE backbone compatible with UWB token injection.
 
-    UWB token is appended after [Template, Search] and excluded from
-    candidate elimination by including it in global_index_t (template side).
-    After CE blocks, UWB is split out separately before recovery.
+    UWB token is appended after [Template, Search]. CE candidate elimination
+    keeps the original template/search semantics and excludes the tail UWB
+    token from search pruning.
 
     Behaves identically to VisionTransformerCE when uwb_token is None.
     """
@@ -36,6 +38,66 @@ class VisionTransformerCEUWB(VisionTransformerCE):
     @torch.jit.ignore
     def no_weight_decay(self):
         return super().no_weight_decay() | {"uwb_pos_embed"}
+
+    @staticmethod
+    def _candidate_elimination_keep_tail(attn, tokens, lens_t, lens_s,
+                                         keep_ratio, global_index,
+                                         box_mask_z):
+        """Prune only search tokens while preserving tail tokens.
+
+        仅剪枝 search token，保留末尾的 UWB token。
+        """
+        lens_keep = math.ceil(keep_ratio * lens_s)
+        if lens_keep == lens_s:
+            return tokens, global_index, None
+
+        bs, hn, _, _ = attn.shape
+        attn_t = attn[:, :, :lens_t, lens_t:lens_t + lens_s]
+
+        if box_mask_z is not None:
+            box_mask_z = box_mask_z.unsqueeze(1).unsqueeze(-1).expand(
+                -1, attn_t.shape[1], -1, attn_t.shape[-1])
+            attn_t = attn_t[box_mask_z]
+            attn_t = attn_t.view(bs, hn, -1, lens_s)
+            attn_t = attn_t.mean(dim=2).mean(dim=1)
+        else:
+            attn_t = attn_t.mean(dim=2).mean(dim=1)
+
+        sorted_attn, indices = torch.sort(attn_t, dim=1, descending=True)
+        topk_idx = indices[:, :lens_keep]
+        non_topk_idx = indices[:, lens_keep:]
+
+        keep_index = global_index.gather(dim=1, index=topk_idx)
+        removed_index = global_index.gather(dim=1, index=non_topk_idx)
+
+        tokens_t = tokens[:, :lens_t]
+        tokens_s = tokens[:, lens_t:lens_t + lens_s]
+        tokens_tail = tokens[:, lens_t + lens_s:]
+
+        B, _, C = tokens_s.shape
+        attentive_tokens = tokens_s.gather(
+            dim=1, index=topk_idx.unsqueeze(-1).expand(B, -1, C))
+        tokens_new = torch.cat([tokens_t, attentive_tokens, tokens_tail], dim=1)
+
+        return tokens_new, keep_index, removed_index
+
+    def _forward_ce_block_keep_tail(self, blk, x, global_index_t, global_index_s,
+                                    mask=None, ce_template_mask=None,
+                                    keep_ratio_search=None):
+        x_attn, attn = blk.attn(blk.norm1(x), mask, True)
+        x = x + blk.drop_path(x_attn)
+        lens_t = global_index_t.shape[1]
+        lens_s = global_index_s.shape[1]
+
+        removed_index_search = None
+        if blk.keep_ratio_search < 1 and (keep_ratio_search is None or keep_ratio_search < 1):
+            keep_ratio_search = blk.keep_ratio_search if keep_ratio_search is None else keep_ratio_search
+            x, global_index_s, removed_index_search = self._candidate_elimination_keep_tail(
+                attn, x, lens_t, lens_s, keep_ratio_search,
+                global_index_s, ce_template_mask)
+
+        x = x + blk.drop_path(blk.mlp(blk.norm2(x)))
+        return x, global_index_t, global_index_s, removed_index_search, attn
 
     def forward_features(self, z, x, mask_z=None, mask_x=None,
                          ce_template_mask=None, ce_keep_rate=None,
@@ -59,6 +121,12 @@ class VisionTransformerCEUWB(VisionTransformerCE):
             mask_x = mask_x.flatten(1).unsqueeze(-1)
 
             mask_x = combine_tokens(mask_z, mask_x, mode=self.cat_mode)
+            if uwb_token is not None:
+                uwb_mask = torch.zeros(
+                    mask_x.shape[0], 1, 1,
+                    device=mask_x.device,
+                    dtype=mask_x.dtype)
+                mask_x = torch.cat([mask_x, uwb_mask], dim=1)
             mask_x = mask_x.squeeze(-1)
 
         if self.add_cls_token:
@@ -82,7 +150,7 @@ class VisionTransformerCEUWB(VisionTransformerCE):
                 x, pred_uv, uwb_conf_pred
             )
 
-        # ---- UWB: append token ----
+        # ---- UWB: append token after search ----
         has_uwb = uwb_token is not None
         if has_uwb:
             if uwb_token.ndim == 2:
@@ -90,9 +158,7 @@ class VisionTransformerCEUWB(VisionTransformerCE):
             uwb_token = uwb_token + self.uwb_pos_embed.to(device=uwb_token.device, dtype=uwb_token.dtype)
             if self.cat_mode != "direct":
                 raise NotImplementedError("VisionTransformerCEUWB supports UWB token with direct cat_mode only")
-            # Keep UWB on the template side before CE slicing.
-            # 将 UWB 放在 template 侧，避免 CE 按前缀长度切分时误认为它是 search token。
-            x = torch.cat([z, uwb_token, x], dim=1)
+            x = torch.cat([z, x, uwb_token], dim=1)
         else:
             x = combine_tokens(z, x, mode=self.cat_mode)
 
@@ -105,20 +171,17 @@ class VisionTransformerCEUWB(VisionTransformerCE):
         global_index_t = torch.linspace(0, lens_z - 1, lens_z).to(x.device)
         global_index_t = global_index_t.repeat(B, 1)
 
-        # ---- UWB: expand global_index_t to mark UWB as template-side ----
-        # CE slices tokens by prefix length, so UWB is physically placed after
-        # template tokens and before search tokens.
-        # CE 通过前缀长度切分 token，因此 UWB 必须实际位于 template 与 search 中间。
-        if has_uwb:
-            uwb_idx = torch.full(
-                (B, 1), lens_z, device=x.device, dtype=global_index_t.dtype)
-            global_index_t = torch.cat([global_index_t, uwb_idx], dim=1)
-
         removed_indexes_s = [uwb_layer0_removed_index_s] if uwb_layer0_removed_index_s is not None else []
         for i, blk in enumerate(self.blocks):
-            x, global_index_t, global_index_s, removed_index_s, attn = \
-                blk(x, global_index_t, global_index_s, mask_x,
-                    ce_template_mask, ce_keep_rate)
+            if has_uwb:
+                x, global_index_t, global_index_s, removed_index_s, attn = \
+                    self._forward_ce_block_keep_tail(
+                        blk, x, global_index_t, global_index_s, mask_x,
+                        ce_template_mask, ce_keep_rate)
+            else:
+                x, global_index_t, global_index_s, removed_index_s, attn = \
+                    blk(x, global_index_t, global_index_s, mask_x,
+                        ce_template_mask, ce_keep_rate)
 
             if self.ce_loc is not None and i in self.ce_loc:
                 removed_indexes_s.append(removed_index_s)
@@ -127,11 +190,12 @@ class VisionTransformerCEUWB(VisionTransformerCE):
         lens_x_new = global_index_s.shape[1]
         lens_z_new = global_index_t.shape[1]
 
-        # ---- UWB: split z, uwb, x ----
+        # ---- UWB: split z, x, uwb ----
         if has_uwb:
-            z = x[:, :lens_z]                         # template tokens
-            uwb_out = x[:, lens_z:lens_z_new]          # UWB token(s)
-            x = x[:, lens_z_new:]                      # search tokens
+            x_all = x
+            z = x_all[:, :lens_z]                         # template tokens
+            x = x_all[:, lens_z:lens_z + lens_x_new]       # search tokens
+            uwb_out = x_all[:, lens_z + lens_x_new:]       # UWB token(s)
         else:
             z = x[:, :lens_z_new]
             x = x[:, lens_z_new:]
@@ -152,9 +216,9 @@ class VisionTransformerCEUWB(VisionTransformerCE):
 
         x = recover_tokens(x, lens_z, lens_x, mode=self.cat_mode)
 
-        # ---- UWB: re-concatenate with UWB between template and search ----
+        # ---- UWB: re-concatenate as [Template, Search, UWB] ----
         if has_uwb:
-            x = torch.cat([z, uwb_out, x], dim=1)
+            x = torch.cat([z, x, uwb_out], dim=1)
         else:
             x = torch.cat([z, x], dim=1)
 

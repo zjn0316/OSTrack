@@ -13,3 +13,4 @@
 8.生成的文件遵守不污染原来ostrack文件，而是在ugtrack/下新建重写，这样既可以保留原有内容还可以添加新功能
 9.修改lib\config\ugtrack\config.py后，更新doc\UGTrack\YAML说明.md
 10.数据集相关的内容参考data\OTB100_UWB\OTB100_UWB说明.md、data\OTB100_UWB\README.md、lib\train\dataset\otb100_uwb.py
+11.完成一项功能后，给出git add xxx;git commit -m "add/fix/docs/refactor/perf/test/chore/revert:描述";git push origin main

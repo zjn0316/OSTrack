@@ -42,14 +42,12 @@ class OSTrack(nn.Module):
                 ce_template_mask=None,
                 ce_keep_rate=None,
                 return_last_attn=False,
-                uwb_token=None,
                 ):
         # backbone前向传播
         x, aux_dict = self.backbone(z=template, x=search,
                                     ce_template_mask=ce_template_mask,
                                     ce_keep_rate=ce_keep_rate,
-                                    return_last_attn=return_last_attn,
-                                    uwb_token=uwb_token, )
+                                    return_last_attn=return_last_attn, )
 
         # Forward head
         feat_last = x

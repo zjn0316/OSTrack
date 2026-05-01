@@ -135,7 +135,7 @@ def build_ugtrack(cfg, training=True):
         # =====================
         # 加载已训练 OSTrack tracker 权重
         # =====================
-        if pretrain_file and pretrain_is_ostrack_checkpoint and training:
+        if pretrain_file and pretrain_is_ostrack_checkpoint:
             checkpoint = torch.load(pretrain_file, map_location="cpu")
             missing_keys, unexpected_keys = tracker.load_state_dict(checkpoint["net"], strict=False)
             print("Load pretrained OSTrack tracker from: {}".format(pretrain_file))

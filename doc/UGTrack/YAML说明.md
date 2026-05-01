@@ -88,6 +88,7 @@ UWB时序输入 [B, T, 2]
 **Stage-2 专用说明：**
 
 - 冻结 `encoder` + `pred_head` + `conf_head`（UWB prior），仅训练 `token_head` + 视觉跟踪器。
+- `MODEL.PRETRAIN_FILE` 在 Stage-2 测试/训练时应指向已训练的 OSTrack 视觉 checkpoint，例如 `D:/OSTrack/output/checkpoints/train/ostrack/vitb_256_mae_32x4_ep300/OSTrack_ep0300.pth.tar`。若测试时只加载 UWB-only checkpoint 而不加载视觉 tracker 权重，预测框会快速漂移，后续 `sample_target()` 的 search crop 会和原版 OSTrack 不一致。
 - 以下 OSTrack 的跟踪损失参数在 Stage-2 生效：`GIOU_WEIGHT`、`L1_WEIGHT`、`BACKBONE_MULTIPLIER`。
 - CE 相关参数（`CE_LOC`、`CE_KEEP_RATIO` 等）仅在 Stage-2 + CE backbone 时生效。
 - 第 0 层 UWB 引导剪枝在 Stage-2 生效，基于 `pred_uv` 和 `uwb_conf_pred` 对 search patch token 做空间 Top-K，并在进入跟踪头前恢复到完整 16×16 search token 网格。

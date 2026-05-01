@@ -81,11 +81,14 @@ class UGTrack(BaseTracker):
     def track(self, image, info: dict = None):
         H, W, _ = image.shape
         self.frame_id += 1
+        search_box = list(self.state)
         x_patch_arr, resize_factor, x_amask_arr = sample_target(
-            image, self.state, self.params.search_factor, output_sz=self.params.search_size
+            image, search_box, self.params.search_factor, output_sz=self.params.search_size
         )
         search = self.preprocessor.process(x_patch_arr, x_amask_arr)
-        search_uwb_seq = self._build_search_uwb_seq(self.frame_id, H, W)
+        search_uwb_seq = self._build_search_uwb_seq(
+            self.frame_id, H, W, search_box, resize_factor
+        )
 
         with torch.no_grad():
             out_dict = self.network.forward(
@@ -169,7 +172,7 @@ class UGTrack(BaseTracker):
             return None
         return np.loadtxt(uwb_obs_path, delimiter=",", dtype=np.float32)
 
-    def _build_search_uwb_seq(self, frame_id, height, width):
+    def _build_search_uwb_seq(self, frame_id, height, width, search_box, resize_factor):
         seq_len = int(self.cfg.DATA.UWB.SEQ_LEN)
         if self.uwb_obs is None:
             seq = np.zeros((seq_len, 2), dtype=np.float32)
@@ -179,10 +182,20 @@ class UGTrack(BaseTracker):
             frame_id = min(max(frame_id, 0), max_id)
             hist_ids = [max(frame_id - seq_len + 1 + i, 0) for i in range(seq_len)]
             seq = uv[hist_ids].astype(np.float32)
-            seq[:, 0] = seq[:, 0] / float(width)
-            seq[:, 1] = seq[:, 1] / float(height)
+            seq = self._map_uwb_seq_to_search_crop(seq, search_box, resize_factor)
             seq = np.clip(seq, 0.0, 1.0)
         return torch.from_numpy(seq).unsqueeze(0).float().cuda()
+
+    def _map_uwb_seq_to_search_crop(self, seq, search_box, resize_factor):
+        x, y, w, h = search_box
+        cx = x + 0.5 * w
+        cy = y + 0.5 * h
+        crop_center = 0.5 * (float(self.params.search_size) - 1.0)
+
+        seq_crop = seq.copy()
+        seq_crop[:, 0] = (crop_center + (seq[:, 0] - cx) * resize_factor) / float(self.params.search_size)
+        seq_crop[:, 1] = (crop_center + (seq[:, 1] - cy) * resize_factor) / float(self.params.search_size)
+        return seq_crop
 
     def map_box_back(self, pred_box: list, resize_factor: float):
         cx_prev, cy_prev = self.state[0] + 0.5 * self.state[2], self.state[1] + 0.5 * self.state[3]

@@ -3,6 +3,7 @@ DATA:
     SEQ_LEN: 10
 
 MODEL:
+  PRETRAIN_FILE: "D:/OSTrack/output/checkpoints/train/ostrack/vitb_256_mae_32x4_ep300/OSTrack_ep0300.pth.tar"
   BACKBONE:
     TYPE: vit_base_patch16_224
     UWB_ENCODER: tcn

@@ -28,14 +28,21 @@ class UWBGuidedPruner(nn.Module):
 
     @staticmethod
     def _build_patch_centers(grid_size):
+        """构建每个patch的中心坐标（归一化）。
+        返回形状为 (N, 2) 的张量，其中 N = grid_size^2，每一行为 (x_center, y_center) 在 [0,1] 范围内。
+        """
         coord = (torch.arange(grid_size, dtype=torch.float32) + 0.5) / float(grid_size)
         yy, xx = torch.meshgrid(coord, coord, indexing="ij")
         return torch.stack([xx.reshape(-1), yy.reshape(-1)], dim=-1)
 
     def _get_keep_ratio(self, uwb_conf_pred):
+        """根据UWB置信度计算需要保留的token比例。
+        置信度越高，认为预测越可靠，可以保留更少的token（靠近目标即可）；
+        置信度越低，保留较多的token（更保守的策略）。
+        若uwb_conf_pred为None或未启用动态调整，则返回固定保留比例。
+        """
         if uwb_conf_pred is None or not self.use_conf_dynamic:
             return self.fixed_keep_ratio
-
         conf = uwb_conf_pred.detach().float().reshape(-1).mean().clamp(0.0, 1.0).item()
         # Higher confidence keeps fewer tokens; lower confidence falls back to conservative keep.
         # 置信度越高，保留 token 越少；置信度越低，保留策略越保守。
@@ -43,6 +50,20 @@ class UWBGuidedPruner(nn.Module):
         return keep_ratio
 
     def forward(self, search_tokens, pred_uv, uwb_conf_pred=None):
+        """
+        前向传播：根据预测的UV坐标（目标中心）筛选保留的token。
+
+        参数:
+            search_tokens: 形状 (B, N, C)，搜索区域的token特征，N为patch数量
+            pred_uv: 预测的目标中心坐标，形状 (B, 2) 或 (B, ...)，取前两维作为UV坐标，值域[0,1]
+            uwb_conf_pred: 可选，UWB预测的置信度，形状任意，用于动态调整保留比例
+
+        返回:
+            search_tokens_keep: 保留的token特征，形状 (B, keep_tokens, C)
+            keep_index: 保留的token索引，形状 (B, keep_tokens)
+            removed_index: 被剔除的token索引，形状 (B, N - keep_tokens)
+            keep_ratio: 实际保留比例 (keep_tokens / N)
+        """
         if pred_uv is None:
             return search_tokens, None, None, 1.0
 
@@ -81,6 +102,7 @@ class UWBGuidedPruner(nn.Module):
 
 
 def build_uwb_guided_pruner(cfg):
+    """根据配置字典构建UWBGuidedPruner实例。"""
     backbone_cfg = cfg.MODEL.BACKBONE
     return UWBGuidedPruner(
         search_size=int(cfg.DATA.SEARCH.SIZE),

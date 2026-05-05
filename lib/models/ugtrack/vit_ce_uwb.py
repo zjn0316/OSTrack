@@ -185,7 +185,7 @@ class VisionTransformerCEUWB(VisionTransformerCE):
                     blk(x, global_index_t, global_index_s, mask_x,
                         ce_template_mask, ce_keep_rate)
 
-            if self.ce_loc is not None and i in self.ce_loc:
+            if self.ce_loc is not None and i in self.ce_loc and removed_index_s is not None:
                 removed_indexes_s.append(removed_index_s)
 
         x = self.norm(x)

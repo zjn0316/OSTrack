@@ -1,16 +1,25 @@
+import os
+
 from lib.test.evaluation.environment import EnvSettings
+
 
 def local_env_settings():
     settings = EnvSettings()
 
-    # Set your local paths here.
-    settings.prj_dir = r"D:\OSTrack"
-    settings.save_dir = r"D:\OSTrack\output"
-    settings.result_plot_path = r"D:\OSTrack\output\test\result_plots"
-    settings.results_path = r"D:\OSTrack\output\test\tracking_results"    # Where to store tracking results
-    settings.segmentation_path = r"D:\OSTrack\output\test\segmentation_results"
-    settings.network_path = r"D:\OSTrack\output\test\networks"    # Where tracking networks are stored.
-    settings.otb100_uwb_path = r"D:\OSTrack\data\OTB100_UWB"
+    project_root = '/home/zjn/OSTrack'
+    output_root = os.path.join(project_root, "output")
+
+    # EN: Use repository-relative paths so tests run on Linux without Windows drive letters.
+    # 中文：使用仓库相对路径，避免 Linux 测试依赖 Windows 盘符。
+    settings.prj_dir = project_root
+    settings.save_dir = output_root
+    settings.result_plot_path = os.path.join(output_root, "test", "result_plots")
+    settings.results_path = os.path.join(output_root, "test", "tracking_results")    # Where to store tracking results
+    settings.segmentation_path = os.path.join(output_root, "test", "segmentation_results")
+    settings.network_path = os.path.join(output_root, "test", "networks")    # Where tracking networks are stored.
+    settings.otb100_uwb_path = os.path.join(project_root, "data", "OTB100_UWB")
+    settings.custom_dataset_dir = os.path.join(project_root, "data", "CustomDataset")
+    settings.uav123_uwb_path = os.path.join(project_root, "data", "UAV123_UWB")
     settings.davis_dir = ''
     settings.got10k_lmdb_path = ''
     settings.got10k_path = ''

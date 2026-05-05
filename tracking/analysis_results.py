@@ -15,12 +15,30 @@ trackers.extend(trackerlist(name='ostrack', parameter_name='vitb_256_mae_ce_32x4
                             run_ids=None, display_name='OSTrack256_CE'))
 
 """ugtrack"""
-trackers.extend(trackerlist(name='ugtrack',
-                            parameter_name='vitb_256_mae_ep300_uwb_conv1d_token',
-                            dataset_name=dataset_name,
-                            run_ids=None,
-                            display_name='UGTrack_Conv1D_Token'))
-
+trackers.extend(trackerlist(name='ugtrack', parameter_name='stage2_tcn_residual_seq10_ep100', dataset_name=dataset_name,
+                            run_ids=None, display_name='UGTrack_TCN_seq10_ep100'))
+trackers.extend(trackerlist(name='ugtrack', parameter_name='stage2_tcn_residual_seq10_ep100_ce', dataset_name=dataset_name,
+                            run_ids=None, display_name='UGTrack_TCN_seq10_ep100_CE'))
+# trackers.extend(trackerlist(name='ugtrack',
+#                             parameter_name='ugtrack_token',
+#                             dataset_name=dataset_name,
+#                             run_ids=None,
+#                             display_name='UGTrack_Token'))
+# trackers.extend(trackerlist(name='ugtrack',
+#                             parameter_name='ugtrack_token_prune',
+#                             dataset_name=dataset_name,
+#                             run_ids=None,
+#                             display_name='UGTrack_Token_Prune'))
+# trackers.extend(trackerlist(name='ugtrack',
+#                             parameter_name='ugtrack_token_ce',
+#                             dataset_name=dataset_name,
+#                             run_ids=None,
+#                             display_name='UGTrack_Token_CE'))
+# trackers.extend(trackerlist(name='ugtrack',
+#                             parameter_name='ugtrack_token_prune_ce',
+#                             dataset_name=dataset_name,
+#                             run_ids=None,
+#                             display_name='UGTrack_Token_Prune_CE'))
 
 dataset = get_dataset(dataset_name)
 

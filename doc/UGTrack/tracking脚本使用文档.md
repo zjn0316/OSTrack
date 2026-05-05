@@ -9,13 +9,13 @@
 - `tracking/analysis_results.py`
 - `tracking/analysis_uwb_results.py`
 
-所有命令建议在仓库根目录 `D:\OSTrack` 下执行，并先激活 `ostrack` 环境：
+所有命令建议在仓库根目录 `/path/to/OSTrack` 下执行，并先激活 `ostrack` 环境：
 
-```powershell
+```bash
 conda activate ostrack
 ```
 
-如果当前终端无法直接使用 `conda activate`，请确认 Miniconda 环境路径 `D:\DeepLearning\Miniconda\envs\ostrack` 已正确配置。
+如果当前终端无法直接使用 `conda activate`，请确认 Miniconda 环境路径 `/path/to/miniconda/envs/ostrack` 已正确配置。
 
 ## 1. tracking/train.py
 
@@ -54,19 +54,19 @@ python lib/train/run_training.py ...
 
 单卡训练：
 
-```powershell
+```bash
 python tracking/train.py --script ostrack --config vitb_256_mae_32x4_ep300 --save_dir output --mode single --use_lmdb 0 --use_wandb 0 --distill 0
 ```
 
 单机多卡训练：
 
-```powershell
+```bash
 python tracking/train.py --script ostrack --config vitb_256_mae_32x4_ep300 --save_dir output --mode multiple --nproc_per_node 2 --use_lmdb 0 --use_wandb 0 --distill 0
 ```
 
 多机训练：
 
-```powershell
+```bash
 python tracking/train.py --script ostrack --config vitb_256_mae_32x4_ep300 --save_dir output --mode multi_node --nproc_per_node 2 --world-size 2 --rank 0 --ip 192.168.1.10 --port 20000 --use_lmdb 0 --use_wandb 0 --distill 0
 ```
 
@@ -97,7 +97,7 @@ cfg.TRAIN.STAGE = 1
 
 ### 示例
 
-```powershell
+```bash
 python tracking/train_uwb.py --config experiments/ugtrack/s1_best_t10_bce05.yaml --save_dir output
 ```
 
@@ -153,19 +153,19 @@ Tracker(tracker_name, tracker_param, dataset_name, run_id)
 
 测试 UGTrack 全量 OTB100_UWB：
 
-```powershell
+```bash
 python tracking/test.py ugtrack ugtrack_token_prune_ce --dataset_name otb100_uwb --threads 0 --num_gpus 1
 ```
 
 测试单个序列：
 
-```powershell
+```bash
 python tracking/test.py ugtrack ugtrack_token_prune_ce --dataset_name otb100_uwb --sequence Basketball --threads 0 --num_gpus 1
 ```
 
 使用序列编号测试：
 
-```powershell
+```bash
 python tracking/test.py ugtrack ugtrack_token_prune_ce --dataset_name otb100_uwb --sequence 0 --threads 0 --num_gpus 1
 ```
 
@@ -203,7 +203,7 @@ output/test/tracking_results/<tracker_name>/<tracker_param>/<dataset_name>/
 
 ### 示例
 
-```powershell
+```bash
 python tracking/test_uwb.py --checkpoint output/checkpoints/train/ugtrack/s1_best_t10_bce05/UGTrack_ep0050.pth.tar --config experiments/ugtrack/s1_best_t10_bce05.yaml --save_dir output --split test --seq_len 10
 ```
 
@@ -253,7 +253,7 @@ dataset_name = 'otb100_uwb'
 
 ### 使用方式
 
-```powershell
+```bash
 python tracking/analysis_results.py
 ```
 
@@ -317,13 +317,13 @@ trackers.extend(trackerlist(name='ugtrack',
 
 只输出指标：
 
-```powershell
+```bash
 python tracking/analysis_uwb_results.py --checkpoint output/checkpoints/train/ugtrack/s1_best_t10_bce05/UGTrack_ep0050.pth.tar --config experiments/ugtrack/s1_best_t10_bce05.yaml --split test --seq_len 10
 ```
 
 输出指标并保存图：
 
-```powershell
+```bash
 python tracking/analysis_uwb_results.py --checkpoint output/checkpoints/train/ugtrack/s1_best_t10_bce05/UGTrack_ep0050.pth.tar --config experiments/ugtrack/s1_best_t10_bce05.yaml --split test --seq_len 10 --save_dir output/test/uwb_analysis/s1_best_t10_bce05
 ```
 
@@ -359,19 +359,19 @@ python tracking/analysis_uwb_results.py --checkpoint output/checkpoints/train/ug
 
 1. 训练 UWB 分支：
 
-```powershell
+```bash
 python tracking/train_uwb.py --config experiments/ugtrack/s1_best_t10_bce05.yaml --save_dir output
 ```
 
 2. 评估 UWB 指标：
 
-```powershell
+```bash
 python tracking/analysis_uwb_results.py --checkpoint output/checkpoints/train/ugtrack/s1_best_t10_bce05/UGTrack_ep0050.pth.tar --config experiments/ugtrack/s1_best_t10_bce05.yaml --split test --seq_len 10 --save_dir output/test/uwb_analysis/s1_best_t10_bce05
 ```
 
 3. 导出逐序列 UWB 预测结果：
 
-```powershell
+```bash
 python tracking/test_uwb.py --checkpoint output/checkpoints/train/ugtrack/s1_best_t10_bce05/UGTrack_ep0050.pth.tar --config experiments/ugtrack/s1_best_t10_bce05.yaml --save_dir output --split test --seq_len 10
 ```
 
@@ -379,13 +379,13 @@ python tracking/test_uwb.py --checkpoint output/checkpoints/train/ugtrack/s1_bes
 
 1. 运行 tracker：
 
-```powershell
+```bash
 python tracking/test.py ugtrack ugtrack_token_prune_ce --dataset_name otb100_uwb --threads 0 --num_gpus 1
 ```
 
 2. 汇总跟踪指标：
 
-```powershell
+```bash
 python tracking/analysis_results.py
 ```
 
@@ -410,7 +410,7 @@ python tracking/analysis_results.py
 
 ## Git 提交建议
 
-```powershell
+```bash
 git add doc/UGTrack/tracking脚本使用文档.md vibe_coding/tracking脚本使用文档/进度.md vibe_coding/tracking脚本使用文档/问题及解决措施.md vibe_coding/tracking脚本使用文档/修改文件.md
 git commit -m "docs:新增tracking脚本使用文档"
 git push origin main

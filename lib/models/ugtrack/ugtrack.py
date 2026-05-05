@@ -84,7 +84,8 @@ def build_ugtrack(cfg, training=True):
     # 设置视觉分支初始化路径
     # =====================
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    pretrained_path = os.path.join(current_dir, "../../../pretrained_models")
+    project_root = os.path.abspath(os.path.join(current_dir, "../../.."))
+    pretrained_path = os.path.join(project_root, "pretrained_models")
     pretrain_file = str(getattr(cfg.MODEL, "PRETRAIN_FILE", "") or "")
     pretrain_is_ostrack_checkpoint = (
         "checkpoints/train/ostrack" in pretrain_file.replace("\\", "/").lower()
@@ -92,7 +93,9 @@ def build_ugtrack(cfg, training=True):
     )
     mae_pretrained = ""
     if pretrain_file and training and not pretrain_is_ostrack_checkpoint:
-        mae_pretrained = os.path.join(pretrained_path, pretrain_file)
+        # EN: Keep absolute paths unchanged; resolve relative model names under pretrained_models.
+        # 中文：绝对路径保持不变；相对模型名从 pretrained_models 下解析。
+        mae_pretrained = pretrain_file if os.path.isabs(pretrain_file) else os.path.join(pretrained_path, pretrain_file)
 
     # =====================
     # 构建 UWB branch
@@ -136,9 +139,12 @@ def build_ugtrack(cfg, training=True):
         # 加载已训练 OSTrack tracker 权重
         # =====================
         if pretrain_file and pretrain_is_ostrack_checkpoint:
-            checkpoint = torch.load(pretrain_file, map_location="cpu")
+            # EN: Stage-2 YAML may use repository-relative checkpoint paths on Linux.
+            # 中文：Stage-2 YAML 在 Linux 下可使用仓库相对 checkpoint 路径。
+            checkpoint_path = pretrain_file if os.path.isabs(pretrain_file) else os.path.join(project_root, pretrain_file)
+            checkpoint = torch.load(checkpoint_path, map_location="cpu")
             missing_keys, unexpected_keys = tracker.load_state_dict(checkpoint["net"], strict=False)
-            print("Load pretrained OSTrack tracker from: {}".format(pretrain_file))
+            print("Load pretrained OSTrack tracker from: {}".format(checkpoint_path))
 
 
     # =====================

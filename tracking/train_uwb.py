@@ -44,9 +44,14 @@ def main():
     settings.cfg_file = args.config
     settings.save_dir = os.path.abspath(args.save_dir) if args.save_dir else os.path.abspath('output')
     settings.local_rank = -1
+    settings.use_wandb = False
     settings.project_path = 'train/ugtrack/{}'.format(config_name)
 
     update_settings(settings, cfg)
+
+    log_dir = os.path.join(settings.save_dir, 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    settings.log_file = os.path.join(log_dir, '{}-{}.log'.format(settings.script_name, settings.config_name))
 
     # ============================================
     # DataLoaders
@@ -100,7 +105,7 @@ def main():
     # ============================================
     use_amp = getattr(cfg.TRAIN, 'AMP', False)
     trainer = LTRTrainer(actor, [loader_train, loader_val], optimizer, settings, lr_scheduler, use_amp=use_amp)
-    trainer.train(cfg.TRAIN.EPOCH, load_latest=True, fail_safe=True)
+    trainer.train(cfg.TRAIN.EPOCH, load_latest=True, fail_safe=False)
 
 
 if __name__ == '__main__':

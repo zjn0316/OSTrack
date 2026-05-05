@@ -124,8 +124,6 @@ class UGTrack(BaseTracker):
             else:
                 self.visdom.register((image, info["gt_bbox"].tolist(), self.state), "Tracking", 1, "Tracking")
                 self.visdom.register(torch.from_numpy(x_patch_arr).permute(2, 0, 1), "image", 1, "search_region")
-                self.visdom.register(torch.from_numpy(x_patch_arr).permute(2, 0, 1),
-                                     "image", 1, "search_before_pruning")
                 self.visdom.register(torch.from_numpy(self.z_patch_arr).permute(2, 0, 1), "image", 1, "template")
                 self.visdom.register(pred_score_map.view(self.feat_sz, self.feat_sz), "heatmap", 1, "score_map")
                 self.visdom.register((pred_score_map * self.output_window).view(self.feat_sz, self.feat_sz),
@@ -140,8 +138,6 @@ class UGTrack(BaseTracker):
                     layer0_search = gen_visualization(x_patch_arr, layer0_removed)
                     self.visdom.register(torch.from_numpy(layer0_search).permute(2, 0, 1),
                                          "image", 1, "uwb_pruned_search_layer0")
-                    self.visdom.register(torch.from_numpy(layer0_search).permute(2, 0, 1),
-                                         "image", 1, "search_after_layer0_pruning")
 
         if self.save_all_boxes:
             all_boxes = self.map_box_back_batch(pred_boxes * self.params.search_size / resize_factor, resize_factor)
@@ -150,15 +146,10 @@ class UGTrack(BaseTracker):
 
     def _init_debug_dirs(self):
         os.makedirs(self.save_dir, exist_ok=True)
-        os.makedirs(os.path.join(self.save_dir, "search_before_pruning"), exist_ok=True)
         os.makedirs(os.path.join(self.save_dir, "search_after_layer0_pruning"), exist_ok=True)
 
     def _save_debug_search_images(self, x_patch_arr, out_dict):
         frame_name = "%04d.jpg" % self.frame_id
-        before_path = os.path.join(self.save_dir, "search_before_pruning", frame_name)
-        before_bgr = cv2.cvtColor(x_patch_arr, cv2.COLOR_RGB2BGR)
-        cv2.imwrite(before_path, before_bgr)
-
         if torch.is_tensor(out_dict.get("uwb_layer0_removed_indexes_s")):
             layer0_removed = [out_dict["uwb_layer0_removed_indexes_s"].cpu().numpy()]
             layer0_search = gen_visualization(x_patch_arr, layer0_removed)

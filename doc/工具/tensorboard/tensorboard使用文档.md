@@ -16,7 +16,7 @@ pip install tensorboard
 ## 2. 进入项目目录
 
 ```bash
-cd D:/OSTrack
+cd /path/to/OSTrack
 ```
 
 ## 3. 启动 TensorBoard

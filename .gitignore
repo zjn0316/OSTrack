@@ -162,12 +162,11 @@ cython_debug/
 # lib/test/evaluation/local.py
 
 .vscode/
-/data/
-/output/
-/debug/
+data/
+output/
 pretrained_models/
-script/
-/tensorboard/
+tensorboard/
+vibe_coding/
 doc/UGTrack需求文档.md
 doc/UGTrack设计文档.md
 UGTrack.md

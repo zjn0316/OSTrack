@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data.distributed import DistributedSampler
 
-from lib.train.dataset import OTB100UWB
+from lib.train.dataset import OTB100UWB, UAV123UWB, CustomDataset
 from lib.train.data import uwb_processing, uwb_sampler, LTRLoader, opencv_loader
 from lib.train.data.loader import resolve_num_workers
 from lib.train.data import transforms as tfm
@@ -38,7 +38,6 @@ def names2datasets(name_list: list, settings, image_loader, split='train'):
     datasets = []
     for name in name_list:
         # 限定当前支持的数据集名称范围，便于后续增量扩展。
-        assert name in ['OTB100_UWB']
         if name == 'OTB100_UWB':
             datasets.append(
                 OTB100UWB(
@@ -48,6 +47,26 @@ def names2datasets(name_list: list, settings, image_loader, split='train'):
                     uwb_seq_len=settings.uwb_seq_len,
                 )
             )
+        elif name == 'UAV123_UWB':
+            datasets.append(
+                UAV123UWB(
+                    settings.env.uav123_uwb_dir,
+                    split=split,
+                    image_loader=image_loader,
+                    uwb_seq_len=settings.uwb_seq_len,
+                )
+            )
+        elif name == 'CUSTOM_DATASET':
+            datasets.append(
+                CustomDataset(
+                    settings.env.custom_dataset_dir,
+                    split=split,
+                    image_loader=image_loader,
+                    uwb_seq_len=settings.uwb_seq_len,
+                )
+            )
+        else:
+            raise ValueError(f'Unknown dataset: {name}')
     return datasets
 
 

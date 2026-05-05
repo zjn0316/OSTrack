@@ -1,253 +1,305 @@
-import argparse
+"""
+UV MSE            均方误差，衡量位置预测的整体偏差（归一化坐标）
+UV RMSE           均方根误差，对大误差更敏感（归一化坐标）
+UV MAE (pixel)    像素级平均绝对误差，衡量实际图像空间中的位置偏差（像素）
+In-box Rate       预测 UV 落在搜索区域内的比例，衡量预测是否在合理范围内
+Conf MAE          置信度平均绝对误差，衡量置信度预测的数值精度
+Conf RMSE         置信度均方根误差，对大偏差更敏感
+Conf Pearson      置信度皮尔逊相关系数，衡量置信度预测与真值的线性相关性
+Conf Spearman     置信度斯皮尔曼相关系数，衡量置信度排序一致性
+All / Non-occ / Occ  分别在全体/非遮挡/遮挡样本上评估
+"""
+import _init_paths
 import os
+import glob
+import importlib
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-import _init_paths
+from lib.train.admin import env_settings
 from lib.train.data import opencv_loader
-from lib.train.dataset import OTB100UWB
 from lib.models.ugtrack import build_ugtrack
 
+# ============================================
+# Configuration — edit before running
+# ============================================
+split = 'test'
+save_dir = 'output'                     # must match train_uwb.py --save_dir
 
-def parse_args():
-    parser = argparse.ArgumentParser(description='UGTrack Stage-1 evaluation')
-    parser.add_argument('--checkpoint', type=str, required=True,
-                        help='path to checkpoint.pth')
-    parser.add_argument('--config', type=str, required=True,
-                        help='path to yaml config file')
-    parser.add_argument('--split', type=str, default='test',
-                        help='dataset split to evaluate on (default: test)')
-    parser.add_argument('--seq_len', type=int, default=10,
-                        help='UWB sequence length (must match training)')
-    parser.add_argument('--save_dir', type=str, default=None,
-                        help='save plots to this directory')
-    return parser.parse_args()
+# All UWB datasets to evaluate
+# Format: (display_name, class_name, root_attr)
+_datasets = [
+    ('OTB100_UWB', 'OTB100UWB', 'otb100_uwb_dir'),
+    ('UAV123_UWB', 'UAV123UWB', 'uav123_uwb_dir'),
+    ('custom_dataset', 'CustomDataset', 'custom_dataset_dir'),
+]
 
+# Generate all 48 tracker configs: 3 encoders x 4 seq_len x 4 bce_weight
+# Name format: s1_{encoder}_t{seq_len}_bce{weight_suffix}
+# Weight suffix: 01=0.1, 025=0.25, 05=0.5, 10=1.0
+_encoders = ['mlp', 'gru', 'tcn']
+_seq_lens = [1, 3, 5, 10]
+_weights = [('01', 0.1), ('025', 0.25), ('05', 0.5), ('10', 1.0)]
+
+trackers = []
+for enc in _encoders:
+    for sl in _seq_lens:
+        for ws, wv in _weights:
+            param = 's1_{}_t{}_bce{}'.format(enc, sl, ws)
+            display = '{}_{}_W{}'.format(
+                enc.upper(), 'T'+str(sl), ws)
+            trackers.append(dict(
+                name='ugtrack',
+                parameter_name=param,
+                seq_len=sl,
+                display_name=display,
+            ))
+
+# Global defaults (overridden by per-tracker seq_len when present)
+seq_len = 10
 
 # ============================================
-# Metric helpers
+# Helpers
 # ============================================
 
-def compute_uv_error(pred_uv, gt_uv):
-    """L2 distance between pred_uv [N, 2] and gt_uv [N, 2] (normalized [0,1])."""
+def _find_latest_checkpoint(ckpt_dir):
+    ckpts = sorted(glob.glob(os.path.join(ckpt_dir, '*_ep*.pth.tar')))
+    if not ckpts:
+        raise FileNotFoundError('No checkpoint found in {}'.format(ckpt_dir))
+    return ckpts[-1]
+
+
+def compute_uv_l2(pred_uv, gt_uv):
     return torch.norm(pred_uv - gt_uv, dim=-1).cpu().numpy()
 
 
-def compute_uv_pred_auc(errors, threshold_max=0.50, step=0.01):
-    """Success rate at each threshold, then AUC (trapezoidal rule)."""
-    thresholds = np.arange(step, threshold_max + step, step)
-    success_rates = np.array([(errors < t).mean() for t in thresholds])
-    norm_auc = np.trapz(success_rates, thresholds) / threshold_max
-    return thresholds, success_rates, norm_auc
+def compute_pearson(x, y):
+    n = len(x)
+    xm, ym = x.mean(), y.mean()
+    num = ((x - xm) * (y - ym)).sum()
+    den = np.sqrt(((x - xm) ** 2).sum() * ((y - ym) ** 2).sum())
+    return float(num / den) if den != 0 else 0.0
 
 
-def _roc_auc(labels, scores):
-    """Manual ROC AUC via sorting (equivalent to sklearn's roc_auc_score)."""
-    order = np.argsort(scores)
-    labels_sorted = labels[order]
-    pos_count = labels_sorted.sum()
-    neg_count = len(labels_sorted) - pos_count
-    if pos_count == 0 or neg_count == 0:
-        return float('nan')
-    rank_sum = (labels_sorted == 1).nonzero()[0].sum()
-    return (rank_sum - pos_count * (pos_count - 1) / 2) / (pos_count * neg_count)
-
-
-def compute_conf_auc(conf_pred, errors, error_thresh=0.05):
-    """ROC AUC: does conf_pred predict low UV error?"""
-    labels = (errors < error_thresh).astype(np.float32)
-    conf_scores = conf_pred.flatten()
-    if len(np.unique(labels)) < 2:
-        return float('nan')
-    return _roc_auc(labels, conf_scores)
-
-
-def compute_occlusion_auc(conf_pred, visible_flags):
-    """ROC AUC: does conf_pred predict visible vs occluded?"""
-    labels = visible_flags.astype(np.float32)
-    conf_scores = conf_pred.flatten()
-    if len(np.unique(labels)) < 2:
-        return float('nan')
-    return _roc_auc(labels, conf_scores)
-
-
-def compute_losses(pred_uv, gt_uv, conf_logit, gt_conf):
-    """Recompute L1 + BCEWithLogitsLoss for reference."""
-    from torch.nn.functional import l1_loss, binary_cross_entropy_with_logits
-    pred_loss = l1_loss(pred_uv, gt_uv[..., :2]).item()
-    conf_loss = binary_cross_entropy_with_logits(conf_logit, gt_conf).item()
-    return pred_loss, conf_loss, pred_loss + conf_loss
+def compute_spearman(x, y):
+    try:
+        from scipy.stats import spearmanr
+        return float(spearmanr(x, y)[0])
+    except ImportError:
+        x_rank = np.argsort(np.argsort(x)).astype(np.float64)
+        y_rank = np.argsort(np.argsort(y)).astype(np.float64)
+        n = len(x)
+        d = (x_rank - y_rank) ** 2
+        return float(1 - 6 * d.sum() / (n * (n * n - 1)))
 
 
 # ============================================
-# Evaluation
+# Evaluate each tracker on each dataset
 # ============================================
+# Results keyed by dataset_name -> list of (display, m_all, m_occ, m_nonocc)
+all_dataset_results = {}
 
-def evaluate(checkpoint_path, config_path, split, seq_len, save_dir=None):
-    # -------------------------------------------------------
-    # Config & model
-    # -------------------------------------------------------
-    import importlib
-    config_module = importlib.import_module('lib.config.ugtrack.config')
-    cfg = config_module.cfg
-    config_module.update_config_from_file(config_path)
-    cfg.TRAIN.STAGE = 1
+for ds_display, ds_class_name, ds_root_attr in _datasets:
+    print()
+    print('=' * 70)
+    print('  Dataset: {}, split: {}'.format(ds_display, split))
+    print('=' * 70)
 
-    net = build_ugtrack(cfg, training=False)
-    ckpt = torch.load(checkpoint_path, map_location='cpu')
-    missing, unexpected = net.load_state_dict(ckpt['net'], strict=False)
-    print('Checkpoint: {}'.format(checkpoint_path))
-    print('  missing_keys: {}'.format(missing))
-    print('  unexpected_keys: {}'.format(unexpected))
-    net.cuda()
-    net.eval()
+    # Dynamically import dataset class
+    ds_module_name = ds_display.lower().replace('-', '_')
+    try:
+        ds_module = importlib.import_module('lib.train.dataset.{}'.format(ds_module_name))
+        DSClass = getattr(ds_module, ds_class_name)
+        ds_root = getattr(env_settings(), ds_root_attr)
+    except (ModuleNotFoundError, AttributeError) as e:
+        print('  ** SKIP: cannot load dataset {}: {}'.format(ds_display, e))
+        continue
 
-    # -------------------------------------------------------
-    # Dataset
-    # -------------------------------------------------------
-    from lib.train.admin import env_settings
-    dataset = OTB100UWB(root=env_settings().otb100_uwb_dir, image_loader=opencv_loader,
-                        split=split, uwb_seq_len=seq_len)
-    n_seqs = dataset.get_num_sequences()
-    print('Evaluating on {} split, {} sequences'.format(split, n_seqs))
+    if not os.path.isdir(ds_root):
+        print('  ** SKIP: dataset directory not found: {}'.format(ds_root))
+        continue
 
-    # -------------------------------------------------------
-    # Inference
-    # -------------------------------------------------------
-    coord_scale = float(cfg.DATA.SEARCH.SIZE)  # normalize to [0,1] like training
+    all_results = []
 
-    all_pred_uv = []
-    all_gt_uv = []
-    all_conf_pred = []
-    all_conf_logit = []
-    all_gt_conf = []
-    all_visible = []
+    for t in trackers:
+        name = t['name']
+        param = t['parameter_name']
+        seq_len = t.get('seq_len', seq_len)
+        display = t.get('display_name', param)
 
-    with torch.no_grad():
-        for seq_id in range(n_seqs):
-            seq_info = dataset.get_sequence_info(seq_id)
-            n_frames = seq_info['bbox'].shape[0]
-            visible = seq_info['visible'].cpu().numpy()
+        print('========== Evaluating {} (seq_len={}) on {} =========='.format(display, seq_len, ds_display))
+        config_path = os.path.join('experiments', name, param + '.yaml')
+        ckpt_dir = os.path.join(save_dir, 'checkpoints', 'train', name, param)
+        ckpt_path = _find_latest_checkpoint(ckpt_dir)
 
-            for f_id in range(n_frames):
-                search_uwb_seq = seq_info['uwb_seq'][f_id].unsqueeze(0).cuda().float()
-                gt_uv = seq_info['uwb_gt'][f_id, :2].unsqueeze(0).cuda()
-                gt_conf = seq_info['uwb_conf'][f_id].view(1, 1).cuda().float()
+        # Config & model
+        config_module = importlib.import_module('lib.config.{}.config'.format(name))
+        cfg = config_module.cfg
+        config_module.update_config_from_file(config_path)
+        cfg.TRAIN.STAGE = 1
 
-                # Normalize pixel coordinates to [0,1] like UWBStage1Dataset did
-                search_uwb_seq = (search_uwb_seq / coord_scale).clamp(0.0, 1.0)
-                gt_uv = (gt_uv / coord_scale).clamp(0.0, 1.0)
+        net = build_ugtrack(cfg, training=False)
+        ckpt = torch.load(ckpt_path, map_location='cpu')
+        missing, unexpected = net.load_state_dict(ckpt['net'], strict=False)
+        if missing:
+            print('  [{}] missing_keys: {}'.format(display, missing))
+        net.cuda()
+        net.eval()
 
-                out = net(search_uwb_seq=search_uwb_seq, stage=1)
-                pred_uv = out['pred_uv']
-                conf_logit = out['uwb_conf_logit']
-                conf_pred = out['uwb_conf_pred']
+        # Dataset
+        dataset = DSClass(root=ds_root, image_loader=opencv_loader,
+                          split=split, uwb_seq_len=seq_len)
+        n_seqs = dataset.get_num_sequences()
 
-                all_pred_uv.append(pred_uv.cpu())
-                all_gt_uv.append(gt_uv.cpu())
-                all_conf_pred.append(conf_pred.cpu())
-                all_conf_logit.append(conf_logit.cpu())
-                all_gt_conf.append(gt_conf.cpu())
-                all_visible.append(visible[f_id])
+        # Inference
+        coord_scale = float(cfg.DATA.SEARCH.SIZE)
+        all_pred_uv, all_gt_uv = [], []
+        all_conf_pred, all_gt_conf = [], []
+        all_visible = []
 
-    # -------------------------------------------------------
-    # Aggregate
-    # -------------------------------------------------------
-    pred_uv = torch.cat(all_pred_uv, dim=0)
-    gt_uv = torch.cat(all_gt_uv, dim=0)
-    conf_pred = torch.cat(all_conf_pred, dim=0)
-    conf_logit = torch.cat(all_conf_logit, dim=0)
-    gt_conf = torch.cat(all_gt_conf, dim=0)
-    visible_arr = np.array(all_visible)
+        with torch.no_grad():
+            for seq_id in range(n_seqs):
+                seq_info = dataset.get_sequence_info(seq_id)
+                visible = seq_info['visible'].cpu().numpy()
 
-    # Losses
-    pred_loss, conf_loss, total_loss = compute_losses(pred_uv, gt_uv, conf_logit, gt_conf)
-    print('\n========== Losses ==========')
-    print('  Loss/uwb_total:  {:.5f}'.format(total_loss))
-    print('  Loss/uwb_pred:   {:.5f}'.format(pred_loss))
-    print('  Loss/uwb_conf:   {:.5f}'.format(conf_loss))
+                for f_id in range(seq_info['bbox'].shape[0]):
+                    uwb_seq = seq_info['uwb_seq'][f_id].unsqueeze(0).cuda().float()
+                    gt_uv = seq_info['uwb_gt'][f_id, :2].unsqueeze(0).cuda()
+                    gt_conf = seq_info['uwb_conf'][f_id].view(1, 1).cuda().float()
 
-    # UV prediction AUC
-    errors = compute_uv_error(pred_uv, gt_uv)
-    thresholds, success_rates, uv_auc = compute_uv_pred_auc(errors)
-    print('\n========== UV Prediction AUC ==========')
-    print('  uv_pred_auc:      {:.4f}'.format(uv_auc))
-    print('  mean L2 error:    {:.4f}'.format(errors.mean()))
+                    uwb_seq = (uwb_seq / coord_scale).clamp(0.0, 1.0)
+                    gt_uv = (gt_uv / coord_scale).clamp(0.0, 1.0)
 
-    # Confidence AUC (predicting low UV error)
-    conf_auc = compute_conf_auc(conf_pred, errors, error_thresh=0.05)
-    print('\n========== Confidence AUC ==========')
-    print('  conf_auc (err<0.05):  {:.4f}'.format(conf_auc))
+                    out = net(search_uwb_seq=uwb_seq, stage=1)
+                    all_pred_uv.append(out['pred_uv'].cpu())
+                    all_gt_uv.append(gt_uv.cpu())
+                    all_conf_pred.append(out['uwb_conf_pred'].cpu())
+                    all_gt_conf.append(gt_conf.cpu())
+                    all_visible.append(visible[f_id])
 
-    # Occlusion AUC (predicting visibility)
-    occ_auc = compute_occlusion_auc(conf_pred, visible_arr)
-    print('\n========== Occlusion AUC ==========')
-    print('  occlusion_auc:    {:.4f}'.format(occ_auc))
+        pred_uv = torch.cat(all_pred_uv, dim=0)
+        gt_uv = torch.cat(all_gt_uv, dim=0)
+        conf_pred = torch.cat(all_conf_pred, dim=0).numpy().flatten()
+        gt_conf = torch.cat(all_gt_conf, dim=0).numpy().flatten()
 
-    # -------------------------------------------------------
-    # Plot
-    # -------------------------------------------------------
-    if save_dir:
-        os.makedirs(save_dir, exist_ok=True)
-        basename = os.path.splitext(os.path.basename(checkpoint_path))[0]
+        visible_arr = np.array(all_visible, dtype=np.int32)
+        if visible_arr.max() > 1:
+            visible_arr = (visible_arr == 255).astype(np.int32)
 
-        fig, axes = plt.subplots(1, 3, figsize=(14, 4))
+        is_visible = (visible_arr == 1)
+        is_occluded = (visible_arr == 0)
 
-        axes[0].plot(thresholds, success_rates, linewidth=2)
-        axes[0].fill_between(thresholds, success_rates, alpha=0.2)
-        axes[0].axvline(0.05, color='gray', linestyle='--', alpha=0.5, label='thresh=0.05')
-        axes[0].set_xlabel('Error threshold')
-        axes[0].set_ylabel('Success rate')
-        axes[0].set_title('UV Prediction AUC = {:.4f}'.format(uv_auc))
-        axes[0].legend()
-        axes[0].grid(True, alpha=0.3)
+        l2_norm = compute_uv_l2(pred_uv, gt_uv)             # L2 in normalized [0,1]
+        l2_pixel = l2_norm * coord_scale                     # L2 in pixels
+        pred_uv_np = pred_uv.numpy()
+        in_box = ((pred_uv_np[:, 0] >= -0.01) & (pred_uv_np[:, 0] <= 1.01) &
+                  (pred_uv_np[:, 1] >= -0.01) & (pred_uv_np[:, 1] <= 1.01))
 
-        axes[1].hist(errors, bins=50, alpha=0.7, edgecolor='black')
-        axes[1].axvline(errors.mean(), color='red', linestyle='--',
-                        label='mean={:.4f}'.format(errors.mean()))
-        axes[1].set_xlabel('L2 error')
-        axes[1].set_ylabel('Count')
-        axes[1].set_title('UV Error Distribution')
-        axes[1].legend()
-        axes[1].grid(True, alpha=0.3)
+        # Compute metrics on All / Non-occ / Occ subsets
+        def compute_subset(selector):
+            if selector.sum() == 0:
+                return None
+            e_norm = l2_norm[selector]
+            e_pixel = l2_pixel[selector]
+            c_pred = conf_pred[selector]
+            c_gt = gt_conf[selector]
+            ib = in_box[selector]
+            return {
+                'uv_mse': float((e_norm ** 2).mean()),
+                'uv_rmse': float(np.sqrt((e_norm ** 2).mean())),
+                'uv_mae_pixel': float(e_pixel.mean()),
+                'inbox_rate': float(ib.mean()),
+                'conf_mae': float(np.abs(c_pred - c_gt).mean()),
+                'conf_rmse': float(np.sqrt(((c_pred - c_gt) ** 2).mean())),
+                'conf_pearson': compute_pearson(c_pred, c_gt),
+                'conf_spearman': compute_spearman(c_pred, c_gt),
+            }
 
-        visible_errs = errors[visible_arr == 1]
-        occluded_errs = errors[visible_arr == 0]
-        if len(occluded_errs) > 0:
-            axes[2].hist(visible_errs, bins=40, alpha=0.6, label='visible', color='green')
-            axes[2].hist(occluded_errs, bins=40, alpha=0.6, label='occluded', color='red')
-            axes[2].set_xlabel('L2 error')
-            axes[2].set_ylabel('Count')
-            axes[2].set_title('Error by Visibility')
-            axes[2].legend()
+        m_all = compute_subset(np.ones(len(is_visible), dtype=bool))
+        m_occ = compute_subset(is_occluded)
+        m_nonocc = compute_subset(is_visible)
+
+        all_results.append((display, m_all, m_occ, m_nonocc))
+
+        # # Plot (disabled: delete eval_plots/ to remove saved figures)
+        # plot_dir = os.path.join(save_dir, 'eval_plots', param)
+        # os.makedirs(plot_dir, exist_ok=True)
+        #
+        # fig, axes = plt.subplots(1, 3, figsize=(14, 4))
+        #
+        # axes[0].hist(l2_pixel, bins=50, alpha=0.7, edgecolor='black')
+        # axes[0].axvline(l2_pixel.mean(), color='red', linestyle='--',
+        #                 label='mean={:.2f}px'.format(l2_pixel.mean()))
+        # axes[0].set_xlabel('L2 error (pixel)')
+        # axes[0].set_ylabel('Count')
+        # axes[0].set_title('UV Error Distribution ({})'.format(ds_display))
+        # axes[0].legend()
+        # axes[0].grid(True, alpha=0.3)
+        #
+        # axes[1].scatter(gt_conf, conf_pred, s=2, alpha=0.3)
+        # axes[1].plot([0, 1], [0, 1], 'r--', alpha=0.5)
+        # axes[1].set_xlabel('Ground truth confidence')
+        # axes[1].set_ylabel('Predicted confidence')
+        # axes[1].set_title('Confidence Prediction ({})'.format(ds_display))
+        # axes[1].set_xlim(0, 1)
+        # axes[1].set_ylim(0, 1)
+        # axes[1].grid(True, alpha=0.3)
+        # axes[1].set_aspect('equal')
+        #
+        # visible_errs = l2_pixel[is_visible]
+        # occluded_errs = l2_pixel[is_occluded]
+        # if len(occluded_errs) > 0:
+        #     axes[2].hist(visible_errs, bins=40, alpha=0.6, label='visible', color='green')
+        #     axes[2].hist(occluded_errs, bins=40, alpha=0.6, label='occluded', color='red')
+        #     axes[2].set_xlabel('L2 error (pixel)')
+        #     axes[2].set_ylabel('Count')
+        #     axes[2].set_title('Error by Visibility ({})'.format(ds_display))
+        #     axes[2].legend()
+        # else:
+        #     axes[2].hist(l2_pixel, bins=40, alpha=0.7, edgecolor='black')
+        #     axes[2].set_xlabel('L2 error (pixel)')
+        #     axes[2].set_title('UV Error (no occlusion in {})'.format(ds_display))
+        # axes[2].grid(True, alpha=0.3)
+        #
+        # plt.tight_layout()
+        # plot_path = os.path.join(plot_dir, '{}_{}_uwb_eval.png'.format(ds_display.lower(), param))
+        # plt.savefig(plot_path, dpi=150)
+        # plt.close(fig)
+        # print('Plot saved: {}'.format(plot_path))
+
+    all_dataset_results[ds_display] = all_results
+
+# ============================================
+# Summary tables per dataset
+# ============================================
+def _fmt(val):
+    return '{:.6f}'.format(val)
+
+def _print_table(title, data_key, results):
+    print()
+    print('{}:'.format(title))
+    header = '{:<22s}  {:>10s}  {:>10s}  {:>12s}  {:>9s}  {:>10s}  {:>10s}  {:>10s}  {:>10s}'.format(
+        'Tracker', 'uv_MSE', 'uv_RMSE', 'uv_MAE_px', 'In-box%', 'ConfMAE', 'ConfRMSE', 'ConfPear', 'ConfSpear')
+    print(header)
+    print('-' * len(header))
+    for display, m_all, m_occ, m_nonocc in results:
+        m = {'all': m_all, 'occ': m_occ, 'nocc': m_nonocc}[data_key]
+        if m is None:
+            print('{:<22s}  {:>10s}  {:>10s}  {:>12s}  {:>9s}  {:>10s}  {:>10s}  {:>10s}  {:>10s}'.format(
+                display, 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A'))
         else:
-            axes[2].hist(errors, bins=40, alpha=0.7, edgecolor='black')
-            axes[2].set_xlabel('L2 error')
-            axes[2].set_title('UV Error (no occlusion in split)')
-        axes[2].grid(True, alpha=0.3)
+            print('{:<22s}  {:>10.6f}  {:>10.6f}  {:>12.6f}  {:>8.2f}%  {:>10.6f}  {:>10.6f}  {:>10.4f}  {:>10.4f}'.format(
+                display, m['uv_mse'], m['uv_rmse'], m['uv_mae_pixel'],
+                m['inbox_rate'] * 100,
+                m['conf_mae'], m['conf_rmse'], m['conf_pearson'], m['conf_spearman']))
 
-        plt.tight_layout()
-        plot_path = os.path.join(save_dir, '{}_uwb_eval.png'.format(basename))
-        plt.savefig(plot_path, dpi=150)
-        print('\nPlot saved to: {}'.format(plot_path))
-
-    # -------------------------------------------------------
-    # Summary line
-    # -------------------------------------------------------
-    print('\n========== SUMMARY ==========')
-    print('{:.5f}  {:.5f}  {:.5f}  {:.4f}  {:.4f}  {:.4f}'.format(
-        total_loss, pred_loss, conf_loss, uv_auc, conf_auc, occ_auc))
-    print('Loss/uwb_total  Loss/uwb_pred  Loss/uwb_conf  uv_pred_auc  conf_auc  occlusion_auc')
-
-
-if __name__ == '__main__':
-    args = parse_args()
-    evaluate(
-        checkpoint_path=args.checkpoint,
-        config_path=args.config,
-        split=args.split,
-        seq_len=args.seq_len,
-        save_dir=args.save_dir,
-    )
+for ds_display in all_dataset_results:
+    print()
+    print('#' * 70)
+    print('#  Dataset: {}'.format(ds_display))
+    print('#' * 70)
+    _print_table('Results - All samples ({})'.format(ds_display), 'all', all_dataset_results[ds_display])
+    _print_table('Results - Non-occluded ({})'.format(ds_display), 'nocc', all_dataset_results[ds_display])
+    _print_table('Results - Occluded ({})'.format(ds_display), 'occ', all_dataset_results[ds_display])

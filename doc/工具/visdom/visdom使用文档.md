@@ -15,7 +15,7 @@ pip install visdom
 如果你使用的是 conda 环境，请先激活目标环境再安装。
 
 ## 3. 启动 Visdom 服务
-在项目根目录（例如 D:/OSTrack）执行：
+在项目根目录（例如 /path/to/OSTrack）执行：
 
 ```bash
 python -m visdom.server -p 8097

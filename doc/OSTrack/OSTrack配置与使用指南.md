@@ -50,13 +50,13 @@
 
 ### 激活环境
 
-```powershell
+```bash
 conda activate ostrack
 ```
 
 ### 验证环境
 
-```powershell
+```bash
 python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA:', torch.cuda.is_available())"
 ```
 
@@ -86,7 +86,7 @@ CUDA: True
 
 **已配置的目录结构**：
 ```
-D:\OSTrack/
+/path/to/OSTrack/
 ├── data/                          # 数据集目录
 ├── output/                        # 输出目录
 │   ├── checkpoints/               # 模型检查点
@@ -104,12 +104,12 @@ D:\OSTrack/
 
 | 路径类型 | 配置值 |
 |---------|--------|
-| 工作目录 | `D:\OSTrack` |
-| 数据目录 | `D:\OSTrack\data` |
-| 输出目录 | `D:\OSTrack\output` |
-| 预训练模型 | `D:\OSTrack\pretrained_models` |
+| 工作目录 | `/path/to/OSTrack` |
+| 数据目录 | `/path/to/OSTrack/data` |
+| 输出目录 | `/path/to/OSTrack/output` |
+| 预训练模型 | `/path/to/OSTrack/pretrained_models` |
 
-**注意**：所有路径已使用 Windows 原生格式（反斜杠 `\`），并添加了 raw string 前缀 `r''` 避免转义问题。
+**注意**：所有路径已使用 Linux/通用 POSIX 风格路径，并由代码按仓库根目录自动推导，避免依赖固定盘符。
 
 ### 数据集路径（需在放入数据后生效）
 
@@ -246,7 +246,7 @@ data/OTB100_UWB/
 **测试状态**: ✓ 训练正常运行
 
 #### 训练命令
-```powershell
+```bash
 conda activate ostrack
 python tracking/train.py --script ostrack --config vitb_256_otb100uwb_test --save_dir ./output --mode single --use_wandb 0
 ```
@@ -258,7 +258,7 @@ python tracking/train.py --script ostrack --config vitb_256_otb100uwb_test --sav
 
 ### 通用训练命令
 
-```powershell
+```bash
 # 单GPU训练（RTX 4060 8GB）
 python tracking/train.py --script ostrack --config vitb_256_mae_ce_32x4_ep300 --save_dir ./output --mode single 
 
@@ -307,7 +307,7 @@ python tracking/train.py --script ostrack --config vitb_256_mae_ce_32x4_ep300 --
 
 #### 评估命令
 
-```powershell
+```bash
 # 评估 OTB100_UWB 测试集（单GPU，多线程）
 conda activate ostrack
 python tracking/test.py ostrack vitb_256_mae_ce_32x4_ep300 --dataset otb100_uwb --threads 8 --num_gpus 1
@@ -346,14 +346,14 @@ python tracking/analysis_results.py
 
 ### 启动 Visdom
 
-```powershell
+```bash
 visdom
 # 访问: http://localhost:8097
 ```
 
 ### 开启调试模式
 
-```powershell
+```bash
 python tracking/test.py ostrack vitb_384_mae_ce_32x4_ep300 --dataset vot22 --threads 1 --num_gpus 1 --debug 1
 ```
 
@@ -414,7 +414,7 @@ python tracking/test.py ostrack vitb_384_mae_ce_32x4_ep300 --dataset vot22 --thr
 
 ### 运行性能分析
 
-```powershell
+```bash
 # 分析 256 模型
 python tracking/profile_model.py --script ostrack --config vitb_256_mae_ce_32x4_ep300
 
@@ -470,7 +470,7 @@ python tracking/profile_model.py --script ostrack --config vitb_384_mae_ce_32x4_
 **原因**: 未激活 conda 环境，系统找不到 Python 解释器
 
 **解决**:
-```powershell
+```bash
 # 必须先激活环境
 conda activate ostrack
 
@@ -479,9 +479,9 @@ python tracking/train.py --script ostrack --config vitb_256_otb100uwb_test ...
 ```
 
 **验证环境已激活**:
-```powershell
+```bash
 # 看到命令行前面有 (ostrack) 前缀
-(ostrack) PS D:\OSTrack>
+(ostrack) /path/to/OSTrack$
 
 # 或者检查 Python 版本
 python --version
@@ -511,7 +511,7 @@ python --version
 ### 🎯 现在可以开始使用了
 
 #### 选项1: 评估已有模型
-```powershell
+```bash
 # 测试 OTB100_UWB 数据集（已准备）
 python tracking/test.py ostrack vitb_256_mae_ce_32x4_ep300 --dataset otb100_uwb 
 
@@ -522,13 +522,13 @@ python tracking/analysis_results.py
 **预期性能**: AUC ~70.22, Precision ~91.69
 
 #### 选项2: 训练自己的模型
-```powershell
+```bash
 # 单GPU训练（需先准备数据集）
 python tracking/train.py --script ostrack --config vitb_256_mae_ce_32x4_ep300 --save_dir ./output --mode single 
 ```
 
 #### 选项3: 可视化调试
-```powershell
+```bash
 # 启动 visdom
 visdom
 
